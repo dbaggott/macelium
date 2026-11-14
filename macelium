@@ -640,6 +640,8 @@ load_settings_list() {
   restart_domain=() restart_app=()
   sandbox_domain=() sandbox_app=() sandbox_state=()
   list_errors='' touch_id_declared=no
+  # source looks a name with no slash up on PATH first.
+  [[ $list == */* ]] || list=./$list
   if [[ ! -r $list ]]; then
     macos_detail="cannot read the settings list $list"
     return 1
@@ -1098,13 +1100,15 @@ run_apps_hooks() {
     printf 'could not hash the apps hooks: %s\n' "$hash" >&2
     return 1
   fi
-  while IFS= read -r hook; do
+  # The list is on its own descriptor, so a hook that reads stdin reads the
+  # command's, not the hooks after it.
+  while IFS= read -r -u 3 hook; do
     [[ -n $hook ]] || continue
     app=${hook%/after-apply}
     app=${app##*/}
     printf '%s\n' "$app"
     bash "$hook" || failed+="${failed:+, }$app"
-  done < <(apps_hooks)
+  done 3< <(apps_hooks)
   if [[ -n $failed ]]; then
     printf 'after-apply failed for %s\n' "$failed" >&2
     return 1
@@ -1424,6 +1428,12 @@ apply() {
     printf '%s\n' "$behind_items" | sed 's/^/  /'
     if confirm "Pull them first?" yes; then
       git -C "$repo" pull --ff-only || return 1
+      # The pulled commits may change the manifest.
+      use_checkout "$repo"
+      if [[ $manifest_failed == yes ]]; then
+        printf 'macelium apply: %s\n' "$repo_detail" >&2
+        return 1
+      fi
       check_behind
     fi
   fi

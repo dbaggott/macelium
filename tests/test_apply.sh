@@ -31,3 +31,16 @@ test_apply_declined_changes_nothing() {
   assert_not_contains "$STUB_LOG" "hook one ran"
   assert_not_contains "$STUB_LOG" "chezmoi apply"
 }
+
+test_apply_rereads_the_manifest_after_pulling() {
+  make_state macelium.conf $'contract 1\n'
+  # Another clone pushes a manifest for a newer macelium.
+  git clone -q "$sandbox/state.git" "$sandbox/other"
+  printf 'contract 2\n' >"$sandbox/other/macelium.conf"
+  git -C "$sandbox/other" -c user.name=test -c user.email=test@example.com commit -q -am newer
+  git -C "$sandbox/other" push -q
+  run_tty y -- "$tool" apply
+  assert_status 1
+  assert_contains "$out" "upgrade macelium"
+  assert_not_contains "$STUB_LOG" "chezmoi apply"
+}

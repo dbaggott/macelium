@@ -65,3 +65,12 @@ test_failed_hook_records_no_hash() {
   assert_contains "$STUB_LOG" "hook two ran"
   [[ ! -e $HOME/.local/state/macelium/apps-hooks.sha256 ]] || fail "hash recorded after a failed hook"
 }
+
+test_hook_reading_stdin_leaves_the_rest_to_run() {
+  make_state macelium.conf $'contract 1\n' \
+    apps/one/after-apply $'cat >/dev/null\n' \
+    apps/two/after-apply $'echo "hook two ran" >>"$STUB_LOG"\n'
+  run_tty y -- "$tool" apply
+  assert_status 0
+  assert_contains "$STUB_LOG" "hook two ran"
+}
