@@ -1,0 +1,4 @@
+#!/bin/bash
+# Records the call, and finds no such app running.
+echo "killall $*" >>"$STUB_LOG"
+exit 1

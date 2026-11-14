@@ -1,0 +1,1872 @@
+#!/bin/bash
+# Compares this machine with a state repo, and brings it in line, in the shape
+# of terraform's plan and apply. The state repo is a chezmoi source with
+# macelium.conf at its root, naming its Brewfile, settings list and apps
+# directory (README.md, "The state repo").
+#
+#   macelium bootstrap [<checkout>]
+#   macelium plan [--notify]
+#   macelium apply
+#   macelium settings [--file <path>]
+#
+# plan changes nothing on the machine but a git fetch in the checkout and,
+# without --notify, a brew update, and never prompts. It prints every
+# difference by section, then a count line, and exits 0 when nothing differs,
+# 2 when anything does, and 1 when a check failed. Upgrades available for what
+# the Brewfiles list are shown and counted but leave the exit status alone,
+# since some are pending most days. With --notify it prints one line in place
+# of the sections and posts one macOS notification when the exit status is
+# not 0: the formula's service runs it daily and sends the line to its log.
+#
+# apply prints the plan, asks, then runs chezmoi apply, brew bundle over both
+# Brewfiles and mise install, upgrading only when the plan showed upgrades,
+# then writes the macOS settings that still differ, and runs the apps' hooks,
+# each when the plan listed it. When a check failed, the plan is partial and
+# apply stops without asking. It never removes anything: a package installed
+# but not listed stays until it is listed or uninstalled by hand.
+#
+# bootstrap sets up a machine from a checkout, the one named or else the one
+# chezmoi's config names, before anything is applied or again at any point
+# after. It first checks what it needs from macOS, App Management and Full
+# Disk Access for the terminal, and stops naming each that is missing. It then
+# asks for sudo once, runs chezmoi init and applies the files, then runs each
+# chezmoi script and each of apply's steps as its own step, so one that fails
+# stops none after it, with the output in its log. It ends with the plan, each
+# step's result, and the manual steps.
+#
+# settings writes the macOS settings that differ from the list, the state
+# repo's unless --file names another, without asking, and restarts the apps
+# that read them.
+#
+# Checks: tracked files differ from the source state (chezmoi status);
+# Homebrew has a formula, cask or tap that neither the state repo's Brewfile
+# nor ~/.config/macelium/Brewfile.local lists; an entry either Brewfile lists
+# is not installed, tapped or linked; the checkout is behind its upstream
+# after a fetch; a runtime the mise global config pins is not installed; a
+# macOS setting the list declares has another value; an apps hook, or a file
+# it watches, changed since the hooks last ran.
+set -uo pipefail
+
+# brew bundle runs brew update first unless this is set, which in apply would
+# upgrade past what the plan showed; update_homebrew runs it instead.
+export HOMEBREW_NO_AUTO_UPDATE=1
+
+local_brewfile="$HOME/.config/macelium/Brewfile.local"
+# The dotfiles command's per-machine Brewfile, which macelium does not read:
+# plan warns while it exists.
+old_local_brewfile="$HOME/.Brewfile.local"
+state_dir="$HOME/.local/state/macelium"
+# The manifest contract this macelium reads (README.md, "Contract").
+known_contract=1
+# The agent's run on wake can start before the network is back, so --notify
+# retries the fetch; a plan or apply run by hand fetches once.
+notify_fetch_attempts=3
+fetch_retry_seconds=30
+
+# Each check sets <check>_result to clean, drift, error, or skipped when the
+# state repo lacks the part it checks; on error sets
+# <check>_detail to why: a line naming what failed, then whatever the failing
+# command printed; and on drift sets <check>_items to what differs, one item
+# per line.
+chezmoi_result='' chezmoi_detail='' chezmoi_items=''
+brew_result='' brew_detail='' brew_items=''
+missing_result='' missing_detail='' missing_items=''
+behind_result='' behind_detail='' behind_items=''
+mise_result='' mise_detail='' mise_items=''
+hooks_result='' hooks_detail='' hooks_items=''
+# check_macos's are declared under "macOS settings" below.
+# Run only for the full plan, and never drift for plan's exit status.
+outdated_result='' outdated_detail='' outdated_items=''
+
+# Set by check_chezmoi: whether chezmoi's config was rendered from an older
+# config template, and the diff of the targets it lists.
+chezmoi_config_stale=no
+chezmoi_diff=''
+
+repo='' repo_detail=''
+upstream=''
+# Set by load_manifest: whether the manifest refused, which stops plan and
+# apply before any check, and the parts of the state repo it names, each an
+# absolute path that may not exist. A missing one skips its part.
+manifest_failed=no
+state_brewfile='' state_settings='' state_apps='' state_init_notes=''
+
+# What needs the operator's attention but stops nothing, a line each, which
+# each command prints at its end.
+warnings=''
+
+# Takes warnings, a line each. One already given, such as apply's settings
+# step repeating the plan's, is given once.
+warn() {
+  local line
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    grep -qxF -- "$line" <<<"$warnings" || warnings+="${warnings:+$'\n'}$line"
+  done <<<"$1"
+}
+
+# Prints each warning, after a blank line, to stderr.
+print_warnings() {
+  [[ -n $warnings ]] || return 0
+  local line
+  echo >&2
+  while IFS= read -r line; do
+    printf 'Warning: %s\n' "$line" >&2
+  done <<<"$warnings"
+}
+
+# Takes how a command ended, and prints it with the warnings' count, as the
+# command's last line.
+print_outcome() {
+  local count
+  count=$(count_lines "$warnings")
+  case $count in
+    0) printf '%s.\n' "$1" ;;
+    1) printf '%s, with 1 warning.\n' "$1" ;;
+    *) printf '%s, with %s warnings.\n' "$1" "$count" ;;
+  esac
+}
+
+# Takes the command that failed, its output and its exit status.
+failure_detail() {
+  printf "\`%s\` exited %s" "$1" "$3"
+  if [[ -n $2 ]]; then printf ':\n%s' "$2"; fi
+  printf '\n'
+}
+
+# Takes a detail and prints it on one line, for the log: its first line, then
+# its last when it has more.
+detail_line() {
+  local first last
+  first=$(head -n 1 <<<"$1") last=$(tail -n 1 <<<"$1")
+  if [[ $last == "$first" ]]; then
+    printf '%s\n' "$first"
+  else
+    printf '%s %s\n' "$first" "$last"
+  fi
+}
+
+count_lines() {
+  if [[ -z $1 ]]; then
+    echo 0
+  else
+    printf '%s\n' "$1" | wc -l | tr -d ' '
+  fi
+}
+
+# Takes whether to diff the targets chezmoi status lists.
+check_chezmoi() {
+  local want_diff=$1 out status
+  out=$(chezmoi status </dev/null 2>&1)
+  status=$?
+  if ((status != 0)); then
+    chezmoi_result=error chezmoi_detail=$(failure_detail "chezmoi status" "$out" "$status")
+    return
+  fi
+  # Status lines are two state columns and a path. Of the warnings, only the
+  # config template's means the machine differs from the repo: its config
+  # file was rendered from an older template.
+  chezmoi_items=$(grep -E '^[ ADMR]{2} ' <<<"$out")
+  if grep -q '^warning: config file template has changed' <<<"$out"; then
+    chezmoi_config_stale=yes
+  fi
+  if [[ -z $chezmoi_items && $chezmoi_config_stale == no ]]; then
+    chezmoi_result=clean
+    return
+  fi
+  chezmoi_result=drift
+  if [[ $want_diff == yes && -n $chezmoi_items ]]; then
+    local color=false
+    [[ -t 1 ]] && color=true
+    out=$(chezmoi diff --no-pager --color="$color" </dev/null 2>&1)
+    status=$?
+    if ((status != 0)); then
+      chezmoi_result=error chezmoi_detail=$(failure_detail "chezmoi diff" "$out" "$status")
+    else
+      chezmoi_diff=$out
+    fi
+  fi
+}
+
+# Sets repo to the checkout, or repo_detail to why it was not found.
+find_checkout() {
+  local command='chezmoi source-path' out status
+  # chezmoi source-path may name the .chezmoiroot directory inside the
+  # checkout, so the checkout is the git top level of what it prints.
+  out=$(chezmoi source-path 2>&1)
+  status=$?
+  if ((status == 0)); then
+    command="git -C $out rev-parse --show-toplevel"
+    out=$(git -C "$out" rev-parse --show-toplevel 2>&1)
+    status=$?
+    if ((status == 0)); then
+      use_checkout "$out"
+      return
+    fi
+  fi
+  repo_detail="checkout not found: $(failure_detail "$command" "$out" "$status")"
+}
+
+# Takes a checkout, and sets repo to it once its manifest loads, or
+# repo_detail to why the manifest refused.
+use_checkout() {
+  if load_manifest "$1"; then
+    repo=$1
+  else
+    repo='' manifest_failed=yes
+  fi
+}
+
+# --- The manifest -----------------------------------------------------------
+#
+# macelium.conf, at the state repo's root, is bash sourced with these
+# declarations defined, and refused unrun, as the settings list is, when it
+# holds anything else. Each path is relative to the state repo's root.
+#
+#   contract <n>       the contract it is written to; required
+#   brewfile <path>    default Brewfile
+#   settings <path>    default macos.sh
+#   apps <dir>         default apps
+#   init_notes <path>  no default
+
+manifest_declarations='contract|brewfile|settings|apps|init_notes'
+# Set by load_manifest, for the declarations: the checkout, and each
+# declaration already made.
+manifest_root='' manifest_seen=''
+
+# Takes a declaration's name and its arguments. Returns non-zero, with the
+# error recorded, unless it has one argument and was not made before.
+manifest_declared_once() {
+  local name=$1
+  shift
+  if (($# != 1)); then
+    declaration_error "$name takes one argument"
+    return 1
+  fi
+  if [[ " $manifest_seen " == *" $name "* ]]; then
+    declaration_error "$name is declared more than once"
+    return 1
+  fi
+  manifest_seen+=" $name"
+}
+
+# Takes a path declaration's name and its arguments, and sets declared_path
+# to the path in the checkout. Returns non-zero, with the error recorded, when
+# the declaration is wrong.
+declared_path=''
+manifest_path() {
+  manifest_declared_once "$@" || return 1
+  if [[ $2 == /* ]]; then
+    declaration_error "$1 $2: not a path relative to the state repo's root"
+    return 1
+  fi
+  declared_path=$manifest_root/$2
+}
+
+contract() {
+  manifest_declared_once contract "$@" || return 0
+  [[ $1 =~ ^[1-9][0-9]*$ ]] || declaration_error "contract $1: not a contract number"
+}
+
+brewfile() {
+  if manifest_path brewfile "$@"; then state_brewfile=$declared_path; fi
+}
+
+settings() {
+  if manifest_path settings "$@"; then state_settings=$declared_path; fi
+}
+
+apps() {
+  if manifest_path apps "$@"; then state_apps=$declared_path; fi
+}
+
+init_notes() {
+  if manifest_path init_notes "$@"; then state_init_notes=$declared_path; fi
+}
+
+# Takes a checkout. Sets the state_ paths from its macelium.conf, or returns
+# non-zero with repo_detail set to why the manifest refused.
+load_manifest() {
+  local checkout=$1 manifest=$1/macelium.conf declared stray status
+  if [[ ! -r $manifest ]]; then
+    repo_detail="no macelium.conf in $checkout"
+    return 1
+  fi
+  # The contract is read first, so a manifest for a newer macelium, which may
+  # make declarations this one does not know, asks for an upgrade rather than
+  # being refused as malformed.
+  declared=$(awk '$1 == "contract" { print $2; exit }' "$manifest")
+  if ! [[ $declared =~ ^[1-9][0-9]*$ ]]; then
+    repo_detail="$manifest has no \`contract <n>\` line naming the contract it is written to"
+    return 1
+  fi
+  if ((${#declared} > ${#known_contract} || 10#$declared > known_contract)); then
+    repo_detail="$manifest is written to contract $declared, and this macelium reads contract $known_contract: upgrade macelium (\`brew upgrade macelium\`)"
+    return 1
+  fi
+  stray=$(stray_lines "$manifest" "$manifest_declarations")
+  if [[ -n $stray ]]; then
+    repo_detail="$manifest holds more than declarations and comments:"$'\n'"$stray"
+    return 1
+  fi
+  manifest_root=$checkout manifest_seen='' list_errors=''
+  state_brewfile=$checkout/Brewfile state_settings=$checkout/macos.sh
+  state_apps=$checkout/apps state_init_notes=''
+  # shellcheck source=/dev/null
+  source "$manifest"
+  status=$?
+  if ((status != 0)); then
+    repo_detail="\`source $manifest\` exited $status"
+    return 1
+  fi
+  if [[ -n $list_errors ]]; then
+    repo_detail="$manifest declares something wrongly:"$'\n'"${list_errors%$'\n'}"
+    return 1
+  fi
+}
+
+# Prints the state repo's Brewfile and then the machine's local one, when it
+# has one.
+brewfiles() {
+  cat "$state_brewfile"
+  # A Brewfile without a final newline would otherwise join the next one.
+  echo
+  if [[ -f $local_brewfile ]]; then cat "$local_brewfile"; fi
+}
+
+# Takes brew bundle cleanup's output and prints each entry under its "Would
+# uninstall" and "Would untap" headings as "<kind> <name>". Any other line
+# starting "Would " opens a list that is not of entries, such as the cache
+# files `brew cleanup` would remove.
+unlisted_entries() {
+  awk '
+    /^Would uninstall casks:$/ { kind = "cask"; next }
+    /^Would uninstall formulae:$/ { kind = "formula"; next }
+    /^Would untap:$/ { kind = "tap"; next }
+    /^Would uninstall .*:$/ { kind = substr($0, 17, length($0) - 17); next }
+    /^Would / || /^Run `brew bundle cleanup/ { kind = ""; next }
+    kind != "" && NF { print kind " " $0 }
+  ' <<<"$1"
+}
+
+# Without --force, brew bundle cleanup lists what it would remove and exits 1
+# only when that includes something to uninstall or untap. Its list of cache
+# files `brew cleanup` would remove leaves the exit status 0, so the status is
+# the signal. The Brewfiles arrive on stdin, so stdin is never a terminal and
+# cleanup cannot ask to go ahead. --formula --cask --tap keeps it to what
+# Homebrew installs, leaving out the package managers it also covers by
+# default (npm, uv, cargo, go, VS Code extensions).
+check_brew() {
+  local out status
+  if [[ ! -e $state_brewfile ]]; then
+    brew_result=skipped
+    return
+  fi
+  out=$(brewfiles | brew bundle cleanup --formula --cask --tap --file=- 2>&1)
+  status=$?
+  if ((status == 0)); then
+    brew_result=clean
+  elif ((status == 1)) && grep -Eq '^Would (uninstall|untap)' <<<"$out"; then
+    brew_result=drift brew_items=$(unlisted_entries "$out")
+  else
+    brew_result=error brew_detail=$(failure_detail "brew bundle cleanup" "$out" "$status")
+  fi
+}
+
+# brew bundle check exits 1 both for an entry the machine does not meet and
+# for a Brewfile it cannot read, so the output tells them apart: --verbose
+# prints a line per unmet entry, whatever it lacks (not installed, not tapped,
+# not linked, a service not started). Without --no-upgrade an installed
+# package with a newer release counts as unmet. check has no filter by entry
+# type, so it covers every kind of entry a Brewfile holds.
+check_missing() {
+  local out status
+  if [[ ! -e $state_brewfile ]]; then
+    missing_result=skipped
+    return
+  fi
+  out=$(brewfiles | brew bundle check --no-upgrade --verbose --file=- 2>&1)
+  status=$?
+  if ((status == 0)); then
+    missing_result=clean
+  elif ((status == 1)) && grep -Eq '^→ .* needs to be ' <<<"$out"; then
+    missing_result=drift missing_items=$(sed -n 's/^→ //p' <<<"$out")
+  else
+    missing_result=error missing_detail=$(failure_detail "brew bundle check --no-upgrade" "$out" "$status")
+  fi
+}
+
+# Prints the entries in brew bundle check's messages, sorted: the text before
+# " needs to be ", which is the same with and without --no-upgrade.
+bundle_entries() {
+  sed -n 's/^\(→ \)\{0,1\}\(.*\) needs to be .*/\2/p' <<<"$1" | sort
+}
+
+# Without --no-upgrade, brew bundle check also reports an installed entry
+# with a newer release, so an entry it reports that check_missing did not is
+# one brew bundle would upgrade. With HOMEBREW_BUNDLE_NO_UPGRADE set, check
+# reads it as --no-upgrade and finds none, as brew bundle then upgrades none.
+check_outdated() {
+  local out status
+  if [[ $missing_result == error ]]; then
+    outdated_result=error outdated_detail="needs check 'missing', which failed"
+    return
+  fi
+  if [[ $missing_result == skipped ]]; then
+    outdated_result=skipped
+    return
+  fi
+  out=$(brewfiles | brew bundle check --verbose --file=- 2>&1)
+  status=$?
+  if ((status == 1)) && grep -Eq '^→ .* needs to be ' <<<"$out"; then
+    outdated_items=$(comm -23 <(bundle_entries "$out") <(bundle_entries "$missing_items"))
+  elif ((status != 0)); then
+    outdated_result=error outdated_detail=$(failure_detail "brew bundle check" "$out" "$status")
+    return
+  fi
+  if [[ -n $outdated_items ]]; then outdated_result=drift; else outdated_result=clean; fi
+}
+
+# Upgrades are only shown, so a failed update warns and the Homebrew checks
+# read the metadata the last update left.
+update_homebrew() {
+  local out
+  out=$(brew update --quiet 2>&1) && return 0
+  warn "brew update failed, so the Homebrew sections are as of its last update: $(tail -n 1 <<<"$out")"
+}
+
+# Takes how many attempts to make. Returns non-zero, with behind_result set to
+# error, when every attempt fails.
+fetch_checkout() {
+  local attempts=$1 out status attempt
+  for ((attempt = 1; ; attempt++)); do
+    # With no remote named, fetch takes the one the branch's upstream is on.
+    out=$(git -C "$repo" fetch --quiet 2>&1) && return 0
+    status=$?
+    if ((attempt >= attempts)); then
+      behind_result=error behind_detail=$(failure_detail "git fetch" "$out" "$status")
+      return 1
+    fi
+    sleep "$fetch_retry_seconds"
+  done
+}
+
+check_behind() {
+  local out status
+  out=$(git -C "$repo" rev-parse --abbrev-ref '@{upstream}' 2>&1)
+  status=$?
+  if ((status != 0)); then
+    behind_result=error behind_detail=$(failure_detail "git rev-parse --abbrev-ref @{upstream}" "$out" "$status")
+    return
+  fi
+  upstream=$out
+  out=$(git -C "$repo" log --oneline 'HEAD..@{upstream}' 2>&1)
+  status=$?
+  if ((status != 0)); then
+    behind_result=error behind_detail=$(failure_detail "git log HEAD..@{upstream}" "$out" "$status")
+  elif [[ -n $out ]]; then
+    behind_result=drift behind_items=$out
+  else
+    behind_result=clean behind_items=''
+  fi
+}
+
+# mise also loads the config files in the current directory and its parents,
+# so it runs from the home directory to keep a project's own pins out. It
+# exits 0 whether or not a version is missing, and marks each one it lists.
+check_mise() {
+  local out status
+  out=$(mise -C "$HOME" ls --missing </dev/null 2>&1)
+  status=$?
+  if ((status != 0)); then
+    mise_result=error mise_detail=$(failure_detail "mise ls --missing" "$out" "$status")
+  elif grep -q '(missing)' <<<"$out"; then
+    mise_result=drift mise_items=$(grep '(missing)' <<<"$out")
+  else
+    mise_result=clean
+  fi
+}
+
+# --- macOS settings ---------------------------------------------------------
+#
+# The settings list is bash, sourced with these declarations defined:
+#
+#   setting [--current-host] <domain> <key> <type> <value>...
+#     <domain> is a defaults domain, or -g for the global one. <type> is bool,
+#     int, float, string, array or unordered-array; an array's values are its
+#     string elements, and an unordered one compares as a set.
+#   disabled_hotkey <id> <character> <key code> <modifiers>
+#     A com.apple.symbolichotkeys entry turned off. Only its enabled flag is
+#     compared; a write writes the whole entry, keeping the key combination
+#     macOS stores with it so the shortcut reads the same if turned back on.
+#   restart_on_change <domain> <app>
+#     The app to restart after a write to the domain. A write to a domain
+#     with no app declared restarts every app in fallback_restarts.
+#   sandboxed_app <domain> <app>
+#     The domain is that sandboxed app's, kept in ~/Library/Containers/<domain>.
+#     Its keys are compared only when the container's preferences can be
+#     read, which needs Full Disk Access; the app is quit for the writes, so
+#     it can't save its own values over them, and reopened if it was running.
+#   touch_id_sudo
+#     Offer to turn on Touch ID for sudo, when the Mac has a finger enrolled
+#     and sudo does not take it already.
+
+settings_declarations='setting|disabled_hotkey|restart_on_change|sandboxed_app|touch_id_sudo'
+fallback_restarts='Dock Finder SystemUIServer ControlCenter'
+sudo_local=/etc/pam.d/sudo_local
+# Apple's /etc/pam.d/sudo_local.template carries this line commented out;
+# /etc/pam.d/sudo includes sudo_local, which survives system updates.
+pam_tid_line='auth       sufficient     pam_tid.so'
+activate_settings=/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings
+
+# macelium settings --file sets this; otherwise the list is the checkout's.
+settings_file=''
+
+# The declarations, one index per setting, sandboxed app or restart.
+setting_host=() setting_domain=() setting_key=() setting_type=() setting_value=()
+restart_domain=() restart_app=()
+sandbox_domain=() sandbox_app=() sandbox_state=()
+touch_id_declared=no
+list_errors=''
+
+macos_result='' macos_detail='' macos_items=''
+# Set by check_macos: the indexes of the settings that differ, and the notes
+# on sandboxed apps whose settings were not compared.
+macos_differing='' macos_notes=''
+# Set by compare_setting.
+setting_current=''
+# Set by write_settings: whether it had a key to write.
+settings_written=no
+# Set by export_domain; check_macos counts its passes, each exporting afresh.
+export_file='' export_dir='' export_pass=0
+
+# Records a declaration the list got wrong, by its line in the list.
+declaration_error() {
+  # The list's frame is the first outside this script.
+  local i=1
+  while [[ ${BASH_SOURCE[i]} == "${BASH_SOURCE[0]}" ]]; do ((i++)); done
+  list_errors+="${BASH_SOURCE[i]}:${BASH_LINENO[i - 1]}: $1"$'\n'
+}
+
+# Takes a declaration file and its declarations' names, as an awk
+# alternation, and prints each line that is none of them, a comment, a blank
+# or the continuation of a declaration. Sourcing runs the file, so such a
+# line, such as a defaults write, refuses it unrun.
+stray_lines() {
+  awk -v names="$2" '
+    !continued && !/^[[:space:]]*(#|$)/ &&
+      $0 !~ ("^(" names ")([[:space:]]|$)") { print FILENAME ":" FNR ": " $0 }
+    { continued = !/^[[:space:]]*#/ && /\\$/ }
+  ' "$1"
+}
+
+setting() {
+  local host='' int_re='^-?[0-9]+$' float_re='^-?[0-9]+(\.[0-9]+)?$'
+  if [[ ${1:-} == --current-host ]]; then
+    host=current
+    shift
+  fi
+  if (($# < 4)); then
+    declaration_error "setting takes a domain, a key, a type and a value"
+    return
+  fi
+  local domain=$1 key=$2 type=$3 valid=yes
+  shift 3
+  case $type in
+    bool) [[ $# == 1 && ($1 == true || $1 == false) ]] || valid=no ;;
+    int) [[ $# == 1 && $1 =~ $int_re ]] || valid=no ;;
+    float) [[ $# == 1 && $1 =~ $float_re ]] || valid=no ;;
+    string) [[ $# == 1 ]] || valid=no ;;
+    array | unordered-array) ;;
+    *)
+      declaration_error "setting $key: unknown type '$type'"
+      return
+      ;;
+  esac
+  if [[ $valid == no ]]; then
+    declaration_error "setting $key: not one $type value: $*"
+    return
+  fi
+  [[ $domain == -g ]] && domain=NSGlobalDomain
+  setting_host+=("$host") setting_domain+=("$domain") setting_key+=("$key")
+  setting_type+=("$type") setting_value+=("$(printf '%s\n' "$@")")
+}
+
+disabled_hotkey() {
+  local int_re='^[0-9]+$' arg
+  if (($# != 4)); then
+    declaration_error "disabled_hotkey takes an id, a character, a key code and modifiers"
+    return
+  fi
+  for arg in "$@"; do
+    if ! [[ $arg =~ $int_re ]]; then
+      declaration_error "disabled_hotkey $1: '$arg' is not a number"
+      return
+    fi
+  done
+  setting_host+=('') setting_domain+=(com.apple.symbolichotkeys)
+  setting_key+=(AppleSymbolicHotKeys) setting_type+=(hotkey) setting_value+=("$*")
+}
+
+restart_on_change() {
+  if (($# != 2)); then
+    declaration_error "restart_on_change takes a domain and an app"
+    return
+  fi
+  restart_domain+=("$1") restart_app+=("$2")
+}
+
+sandboxed_app() {
+  if (($# != 2)); then
+    declaration_error "sandboxed_app takes a domain and an app"
+    return
+  fi
+  sandbox_domain+=("$1") sandbox_app+=("$2") sandbox_state+=('')
+}
+
+touch_id_sudo() {
+  if (($# != 0)); then
+    declaration_error "touch_id_sudo takes no arguments"
+    return
+  fi
+  touch_id_declared=yes
+}
+
+# Takes the list's path. Returns non-zero, with macos_detail set, when it
+# cannot be read or declares something wrongly.
+load_settings_list() {
+  local list=$1 status
+  setting_host=() setting_domain=() setting_key=() setting_type=() setting_value=()
+  restart_domain=() restart_app=()
+  sandbox_domain=() sandbox_app=() sandbox_state=()
+  list_errors='' touch_id_declared=no
+  if [[ ! -r $list ]]; then
+    macos_detail="cannot read the settings list $list"
+    return 1
+  fi
+  local stray
+  stray=$(stray_lines "$list" "$settings_declarations")
+  if [[ -n $stray ]]; then
+    macos_detail="the settings list holds more than declarations and comments:"$'\n'"$stray"
+    return 1
+  fi
+  # shellcheck source=/dev/null
+  source "$list"
+  status=$?
+  if ((status != 0)); then
+    macos_detail="\`source $list\` exited $status"
+    return 1
+  fi
+  if [[ -n $list_errors ]]; then
+    macos_detail="the settings list declares something wrongly:"$'\n'"${list_errors%$'\n'}"
+    return 1
+  fi
+}
+
+# Takes a domain, and prints the index of the sandboxed app it belongs to.
+sandbox_index() {
+  local i
+  for ((i = 0; i < ${#sandbox_domain[@]}; i++)); do
+    if [[ ${sandbox_domain[i]} == "$1" ]]; then
+      echo "$i"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Takes a sandboxed app's index and sets its state: readable, absent when the
+# app has not run yet, or unreadable. The container is visible without Full
+# Disk Access, and listing its preferences is what fails, while defaults
+# export prints an empty domain either way.
+probe_sandbox() {
+  local container="$HOME/Library/Containers/${sandbox_domain[$1]}"
+  if [[ ! -d $container ]]; then
+    sandbox_state[$1]=absent
+  elif ls "$container/Data/Library/Preferences/" >/dev/null 2>&1; then
+    sandbox_state[$1]=readable
+  else
+    sandbox_state[$1]=unreadable
+  fi
+}
+
+# Takes a sandboxed app's index, and prints why its settings were not
+# compared, or nothing when they were.
+sandbox_note() {
+  local app=${sandbox_app[$1]}
+  case ${sandbox_state[$1]} in
+    absent) echo "$app has not run yet, so its settings wait: open $app once, then run \`macelium settings\`" ;;
+    unreadable) echo "$app's settings were not checked: reading them needs Full Disk Access for the terminal (System Settings → Privacy & Security → Full Disk Access)" ;;
+  esac
+}
+
+# Takes current or nothing, and a domain. Sets export_file to the domain
+# exported as a plist, once per pass of check_macos. Returns non-zero, with macos_detail set,
+# when defaults cannot export it.
+export_domain() {
+  local host=$1 domain=$2 args=() out status
+  if [[ -z $export_dir ]]; then
+    export_dir=$(mktemp -d) || {
+      macos_detail="mktemp -d failed"
+      return 1
+    }
+    trap 'rm -rf "$export_dir"' EXIT
+  fi
+  export_file="$export_dir/$export_pass-${host:+$host-}$domain.plist"
+  [[ -f $export_file ]] && return 0
+  [[ $host == current ]] && args+=(-currentHost)
+  out=$(defaults "${args[@]+"${args[@]}"}" export "$domain" - 2>&1 >"$export_file")
+  status=$?
+  if ((status != 0)); then
+    rm -f "$export_file"
+    macos_detail=$(failure_detail "defaults ${args[*]+"${args[*]} "}export $domain" "$out" "$status")
+    return 1
+  fi
+}
+
+# Takes a string, and prints it as a JSON string.
+json_string() {
+  local s=${1//\\/\\\\}
+  printf '"%s"' "${s//\"/\\\"}"
+}
+
+# Takes a setting's index, and prints its key, as the plan names it.
+setting_name() {
+  local name="${setting_domain[$1]} ${setting_key[$1]}"
+  [[ ${setting_type[$1]} == hotkey ]] && name+=".${setting_value[$1]%% *}.enabled"
+  [[ ${setting_host[$1]} == current ]] && name+=" (current host)"
+  printf '%s\n' "$name"
+}
+
+# Takes a setting's index, and prints the value the list declares, in the
+# form compare_setting gives the current one.
+declared_value() {
+  local value=${setting_value[$1]} v json='' sep=''
+  case ${setting_type[$1]} in
+    hotkey) echo false ;;
+    array | unordered-array)
+      if [[ -n $value ]]; then
+        while IFS= read -r v; do
+          json+="$sep$(json_string "$v")" sep=,
+        done <<<"$value"
+      fi
+      printf '[%s]\n' "$json"
+      ;;
+    *) printf '%s\n' "$value" ;;
+  esac
+}
+
+# Takes a plutil key path and a plist, and prints the array's elements, a line
+# each. Returns non-zero when one is not a string.
+array_elements() {
+  local path=$1 file=$2 count j
+  count=$(plutil -extract "$path" raw -o - "$file") || return 1
+  for ((j = 0; j < count; j++)); do
+    [[ $(plutil -type "$path.$j" "$file") == string ]] || return 1
+    plutil -extract "$path.$j" raw -o - "$file"
+  done
+}
+
+# Takes a setting's index and its domain's export. Sets setting_current to the
+# value the machine has, and returns 0 when it is the declared one. An absent
+# key, or one of another type than declared, differs.
+compare_setting() {
+  local i=$1 file=$2 type=${setting_type[$1]} want=${setting_value[$1]}
+  local path=${setting_key[$1]//./\\.} expected actual raw elements
+  [[ $type == hotkey ]] && path+=".${want%% *}.enabled"
+  case $type in
+    bool | hotkey) expected=bool ;;
+    int) expected=integer ;;
+    float | string) expected=$type ;;
+    array | unordered-array) expected=array ;;
+  esac
+  if ! actual=$(plutil -type "$path" "$file" 2>/dev/null); then
+    setting_current='(not set)'
+    return 1
+  fi
+  if [[ $actual != "$expected" ]]; then
+    # plutil's json form takes only an array or a dictionary.
+    local form=raw
+    [[ $actual == array || $actual == dictionary ]] && form=json
+    setting_current="$(plutil -extract "$path" "$form" -o - "$file") ($actual)"
+    return 1
+  fi
+  case $type in
+    array | unordered-array)
+      setting_current=$(plutil -extract "$path" json -o - "$file")
+      elements=$(array_elements "$path" "$file") || return 1
+      if [[ $type == unordered-array ]]; then
+        [[ $(sort <<<"$elements") == "$(sort <<<"$want")" ]]
+      else
+        [[ $elements == "$want" ]]
+      fi
+      return
+      ;;
+  esac
+  raw=$(plutil -extract "$path" raw -o - "$file")
+  setting_current=$raw
+  case $type in
+    float) awk -v a="$raw" -v b="$want" 'BEGIN { exit !(a + 0 == b + 0) }' ;;
+    hotkey) [[ $raw == false ]] ;;
+    *) [[ $raw == "$want" ]] ;;
+  esac
+}
+
+check_macos() {
+  local list=$settings_file i sandbox note
+  macos_detail='' macos_items='' macos_differing='' macos_notes=''
+  # Each comparison exports afresh: apply's runs after chezmoi apply, whose
+  # scripts may have written the keys.
+  ((export_pass++))
+  if [[ -z $list ]]; then
+    if [[ -z $repo ]]; then
+      macos_result=error macos_detail=$repo_detail
+      return
+    fi
+    list=$state_settings
+    if [[ ! -e $list ]]; then
+      macos_result=skipped
+      return
+    fi
+  fi
+  if ! load_settings_list "$list"; then
+    macos_result=error
+    return
+  fi
+  for ((i = 0; i < ${#sandbox_domain[@]}; i++)); do
+    probe_sandbox "$i"
+    note=$(sandbox_note "$i")
+    [[ -n $note ]] && macos_notes+="${macos_notes:+$'\n'}$note"
+  done
+  for ((i = 0; i < ${#setting_key[@]}; i++)); do
+    if sandbox=$(sandbox_index "${setting_domain[i]}") && [[ ${sandbox_state[sandbox]} != readable ]]; then
+      continue
+    fi
+    if ! export_domain "${setting_host[i]}" "${setting_domain[i]}"; then
+      macos_result=error macos_items='' macos_differing=''
+      return
+    fi
+    compare_setting "$i" "$export_file" && continue
+    macos_differing+=" $i"
+    macos_items+="${macos_items:+$'\n'}$(setting_name "$i"): $setting_current → $(declared_value "$i")"
+  done
+  if [[ -n $macos_differing ]]; then macos_result=drift; else macos_result=clean; fi
+}
+
+# Takes a setting's index, and writes its declared value.
+write_setting() {
+  local i=$1 value=${setting_value[$1]} args=() v
+  [[ ${setting_host[i]} == current ]] && args+=(-currentHost)
+  args+=(write "${setting_domain[i]}" "${setting_key[i]}")
+  case ${setting_type[i]} in
+    array | unordered-array)
+      # Each element goes as a plist string, which defaults takes as is: bare,
+      # one such as a lone " fails to parse.
+      args+=(-array)
+      if [[ -n $value ]]; then
+        while IFS= read -r v; do
+          v=$(printf '%s' "$v" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
+          args+=("<string>$v</string>")
+        done <<<"$value"
+      fi
+      ;;
+    hotkey)
+      local id char keycode modifiers
+      read -r id char keycode modifiers <<<"$value"
+      args+=(-dict-add "$id" "
+        <dict>
+          <key>enabled</key><false/>
+          <key>value</key>
+          <dict>
+            <key>parameters</key>
+            <array>
+              <integer>$char</integer>
+              <integer>$keycode</integer>
+              <integer>$modifiers</integer>
+            </array>
+            <key>type</key><string>standard</string>
+          </dict>
+        </dict>")
+      ;;
+    *) args+=("-${setting_type[i]}" "$value") ;;
+  esac
+  defaults "${args[@]}"
+}
+
+# Takes a sandboxed app's index, and writes those of its settings that differ,
+# leaving the app alone when none does. A failed write warns, and the rest
+# still run.
+write_sandboxed() {
+  local s=$1 app=${sandbox_app[$1]} i keys=() was_running=false failed=false
+  for i in $macos_differing; do
+    [[ ${setting_domain[i]} == "${sandbox_domain[s]}" ]] && keys+=("$i")
+  done
+  ((${#keys[@]})) || return 0
+  if pgrep -xq "$app"; then
+    was_running=true
+    killall "$app"
+    for _ in {1..50}; do
+      pgrep -xq "$app" || break
+      sleep 0.1
+    done
+  fi
+  for i in "${keys[@]}"; do
+    write_setting "$i" || {
+      warn "could not write $(setting_name "$i"), skipped it"
+      failed=true
+    }
+  done
+  if $failed; then
+    warn "to write $app's settings, give the terminal Full Disk Access (System Settings → Privacy & Security → Full Disk Access), quit and reopen it, then run \`macelium settings\`"
+  fi
+  if $was_running; then
+    open -ga "$app"
+  fi
+}
+
+# Takes a domain, and prints the apps to restart after a write to it.
+restarts_for() {
+  local i apps=''
+  for ((i = 0; i < ${#restart_domain[@]}; i++)); do
+    [[ ${restart_domain[i]} == "$1" ]] && apps+=" ${restart_app[i]}"
+  done
+  printf '%s\n' "${apps:-$fallback_restarts}"
+}
+
+enable_touch_id_sudo() {
+  [[ $touch_id_declared == yes ]] || return 0
+  if grep -qE '^[[:space:]]*auth[[:space:]]+sufficient[[:space:]]+pam_tid\.so' \
+    "$sudo_local" 2>/dev/null; then
+    return
+  fi
+  # A Mac without Touch ID, or with no finger enrolled, has nothing to offer.
+  bioutil -c 2>/dev/null | grep -Eq '[1-9][0-9]* biometric template' || return 0
+  # chezmoi apply can run with no terminal; that counts as declining.
+  if ! (: </dev/tty) 2>/dev/null; then
+    warn "no terminal, so Touch ID for sudo was skipped: run \`macelium settings\` in a terminal to be asked again"
+    return
+  fi
+  if ! confirm "Enable Touch ID for sudo in $sudo_local? This uses sudo." no; then
+    warn "Touch ID for sudo was skipped: run \`macelium settings\` to be asked again"
+    return
+  fi
+  # An existing file's last line may lack its newline; the line goes on one
+  # of its own.
+  local line=$pam_tid_line
+  if [[ -s $sudo_local && -n $(tail -c 1 "$sudo_local") ]]; then
+    line=$'\n'$line
+  fi
+  if ! printf '%s\n' "$line" | sudo tee -a "$sudo_local" >/dev/null; then
+    warn "could not write $sudo_local, so Touch ID for sudo was skipped"
+  fi
+}
+
+# Takes always or when-writing: whether to offer Touch ID for sudo on a run
+# that has no key to write. Compares the settings again, writes those that
+# differ, then restarts the apps that read them. A failed write stops it, but
+# for a sandboxed app's, which warns.
+write_settings() {
+  local touch_id=$1 i s apps='' app restarted='' hotkeys=no failed=''
+  check_macos
+  if [[ $macos_result == error ]]; then
+    macos_detail="could not read the macOS settings: $macos_detail"
+    return 1
+  fi
+  [[ -n $macos_notes ]] && warn "$macos_notes"
+  settings_written=no
+  if [[ -z $macos_differing ]]; then
+    [[ $touch_id == always ]] && enable_touch_id_sudo
+    return 0
+  fi
+  settings_written=yes
+  echo "Writing:"
+  printf '%s\n' "$macos_items" | sed 's/^/  /'
+  for i in $macos_differing; do
+    sandbox_index "${setting_domain[i]}" >/dev/null && continue
+    if ! write_setting "$i"; then
+      failed=$(setting_name "$i")
+      break
+    fi
+    [[ ${setting_type[i]} == hotkey ]] && hotkeys=yes
+    apps+=" $(restarts_for "${setting_domain[i]}")"
+  done
+  if [[ -z $failed ]]; then
+    for ((s = 0; s < ${#sandbox_domain[@]}; s++)); do
+      write_sandboxed "$s"
+    done
+  fi
+  # The keys written before a failed write still take effect.
+  # activateSettings, a private tool, applies the keyboard shortcut changes
+  # without a logout.
+  if [[ $hotkeys == yes ]]; then
+    "$activate_settings" -u ||
+      warn "could not activate the keyboard shortcuts: log out and in to apply them"
+  fi
+  # One that is not running is skipped.
+  for app in $(tr ' ' '\n' <<<"$apps" | awk 'NF && !seen[$0]++'); do
+    killall "$app" 2>/dev/null && restarted+=" $app"
+  done
+  [[ -n $restarted ]] && echo "Restarted:$restarted"
+  if [[ -n $failed ]]; then
+    macos_detail="could not write $failed"
+    return 1
+  fi
+  enable_touch_id_sudo
+}
+
+# --- Apps hooks -------------------------------------------------------------
+#
+# Each <apps>/<app>/after-apply runs with bash after the other steps, and runs
+# again whenever a hook, an app's watches list, or a path one of those lists
+# changes. A watches list holds a git pathspec a line, relative to the state
+# repo's root. The files hashed are those git lists as tracked or untracked
+# and not ignored, and that still exist. The state directory keeps the hash
+# from the last run in which every hook succeeded.
+
+hooks_hash_file=$state_dir/apps-hooks.sha256
+
+# Prints each hook's path, a line each.
+apps_hooks() {
+  local hook
+  for hook in "$state_apps"/*/after-apply; do
+    if [[ -f $hook ]]; then printf '%s\n' "$hook"; fi
+  done
+}
+
+# Prints the combined hash of the hooks, the watches lists and the files they
+# name. Returns non-zero, with why printed, when git cannot list them.
+apps_hooks_hash() {
+  local rel=${state_apps#"$repo"/} specs watches line listed status path hashed=()
+  specs=("$rel/*/after-apply" "$rel/*/watches")
+  for watches in "$state_apps"/*/watches; do
+    [[ -f $watches ]] || continue
+    while IFS= read -r line || [[ -n $line ]]; do
+      line=${line#"${line%%[![:space:]]*}"}
+      line=${line%"${line##*[![:space:]]}"}
+      if [[ -n $line ]]; then specs+=("$line"); fi
+    done <"$watches"
+  done
+  listed=$(git -C "$repo" -c core.quotePath=false ls-files --cached --others --exclude-standard -- "${specs[@]}" 2>&1) || {
+    status=$?
+    failure_detail "git ls-files" "$listed" "$status"
+    return 1
+  }
+  while IFS= read -r path; do
+    if [[ -n $path && -f $repo/$path ]]; then hashed+=("$path"); fi
+  done <<<"$listed"
+  # Each line pairs a path with its content's hash, so a rename changes the
+  # combined hash too. With no file, shasum would read stdin instead.
+  if ((${#hashed[@]})); then
+    (cd "$repo" && shasum -a 256 -- "${hashed[@]}")
+  fi | shasum -a 256 | cut -d ' ' -f 1
+}
+
+check_hooks() {
+  local hooks hash app names='' why
+  hooks_items='' hooks_detail=''
+  if [[ ! -d $state_apps ]]; then
+    hooks_result=skipped
+    return
+  fi
+  hooks=$(apps_hooks)
+  if [[ -z $hooks ]]; then
+    hooks_result=clean
+    return
+  fi
+  if ! hash=$(apps_hooks_hash); then
+    hooks_result=error hooks_detail="could not hash the apps hooks: $hash"
+    return
+  fi
+  if [[ -r $hooks_hash_file && $(<"$hooks_hash_file") == "$hash" ]]; then
+    hooks_result=clean
+    return
+  fi
+  while IFS= read -r app; do
+    app=${app%/after-apply}
+    names+="${names:+, }${app##*/}"
+  done <<<"$hooks"
+  why="a hook, or a file one watches, changed since they last ran"
+  [[ -e $hooks_hash_file ]] || why="not run on this machine yet"
+  hooks_result=drift hooks_items="run $names ($why)"
+}
+
+# Runs every hook, and records the hash when all succeed. One that fails
+# stops none after it.
+run_apps_hooks() {
+  local hash hook app failed=''
+  if ! hash=$(apps_hooks_hash); then
+    printf 'could not hash the apps hooks: %s\n' "$hash" >&2
+    return 1
+  fi
+  while IFS= read -r hook; do
+    [[ -n $hook ]] || continue
+    app=${hook%/after-apply}
+    app=${app##*/}
+    printf '%s\n' "$app"
+    bash "$hook" || failed+="${failed:+, }$app"
+  done < <(apps_hooks)
+  if [[ -n $failed ]]; then
+    printf 'after-apply failed for %s\n' "$failed" >&2
+    return 1
+  fi
+  mkdir -p "$state_dir" && printf '%s\n' "$hash" >"$hooks_hash_file"
+}
+
+# Takes full, which also diffs the files chezmoi lists, updates Homebrew and
+# looks for upgrades, or notify. Runs every check but the behind one, which plan and
+# apply each run in their own order.
+check_machine() {
+  local full=no
+  [[ $1 == full ]] && full=yes
+  check_chezmoi "$full"
+  check_mise
+  check_macos
+  if [[ -n $repo ]]; then
+    [[ $full == yes && -e $state_brewfile ]] && update_homebrew
+    check_brew
+    check_missing
+    [[ $full == yes ]] && check_outdated
+    check_hooks
+  else
+    hooks_result=error hooks_detail=$repo_detail
+    brew_result=error brew_detail=$repo_detail
+    missing_result=error missing_detail=$repo_detail
+    [[ $full == yes ]] && outdated_result=error outdated_detail=$repo_detail
+  fi
+}
+
+# Takes how many fetch attempts to make.
+fetch_and_check_behind() {
+  if [[ -z $repo ]]; then
+    behind_result=error behind_detail=$repo_detail
+  elif fetch_checkout "$1"; then
+    check_behind
+  fi
+}
+
+# Prints each check that ran and its result, tab-separated, a line each. A
+# detail can run to several lines, so check_detail gives it.
+check_table() {
+  printf '%s\t%s\n' \
+    chezmoi "$chezmoi_result" \
+    brew "$brew_result" \
+    missing "$missing_result" \
+    behind "$behind_result" \
+    mise "$mise_result" \
+    macos "$macos_result" \
+    hooks "$hooks_result"
+  if [[ -n $outdated_result ]]; then
+    printf '%s\t%s\n' outdated "$outdated_result"
+  fi
+}
+
+# Takes a check's name.
+check_detail() {
+  case $1 in
+    chezmoi) printf '%s\n' "$chezmoi_detail" ;;
+    brew) printf '%s\n' "$brew_detail" ;;
+    missing) printf '%s\n' "$missing_detail" ;;
+    behind) printf '%s\n' "$behind_detail" ;;
+    mise) printf '%s\n' "$mise_detail" ;;
+    macos) printf '%s\n' "$macos_detail" ;;
+    hooks) printf '%s\n' "$hooks_detail" ;;
+    outdated) printf '%s\n' "$outdated_detail" ;;
+  esac
+}
+
+failed_checks() {
+  local check result failed=''
+  while IFS=$'\t' read -r check result; do
+    [[ $result == error ]] && failed+="${failed:+, }$check"
+  done < <(check_table)
+  printf '%s\n' "$failed"
+}
+
+# Takes a count of commits.
+commits_phrase() {
+  if (($1 == 1)); then echo "1 commit"; else echo "$1 commits"; fi
+}
+
+items_to_change() {
+  echo $(($(count_lines "$chezmoi_items") + $(count_lines "$missing_items") + $(count_lines "$mise_items") + $(count_lines "$macos_items") + $(count_lines "$hooks_items")))
+}
+
+items_undecided() {
+  local stale=0
+  [[ $chezmoi_config_stale == yes ]] && stale=1
+  echo $(($(count_lines "$brew_items") + stale))
+}
+
+# 0 when nothing differs, 2 when anything does, 1 when a check failed,
+# whatever the others found. The outdated check only shows upgrades, so its
+# drift does not count.
+plan_status() {
+  local table
+  table=$(check_table)
+  grep -q $'\terror$' <<<"$table" && return 1
+  grep -v '^outdated' <<<"$table" | grep -q $'\tdrift$' && return 2
+  return 0
+}
+
+# Takes a heading and the section's items, and prints nothing when it has none.
+print_section() {
+  [[ -n $2 ]] || return 0
+  printf '\n%s\n' "$1"
+  printf '%s\n' "$2" | sed 's/^/  /'
+}
+
+# Takes a heading, the command that removes the entry, and the Brewfile lines
+# that keep it.
+print_keep_remove() {
+  local heading=$1 remove=$2 line quoted=''
+  shift 2
+  for line in "$@"; do quoted+=" '$line'"; done
+  printf '\n  %s\n' "$heading"
+  printf '    keep, this machine:   %s\n' "mkdir -p ~/.config/macelium && printf '%s\\n'$quoted >> ~/.config/macelium/Brewfile.local"
+  printf "    keep, every machine:  add to the repo's Brewfile, through a PR:\n"
+  for line in "$@"; do printf '                            %s\n' "$line"; done
+  printf '    remove:               %s\n' "$remove"
+}
+
+# Takes the unlisted entries, "<kind> <name>" a line each, and prints each
+# with the commands that keep or remove it. A tap comes after the packages
+# from it: brew untap refuses while one is installed, and listing one keeps
+# the tap, so the tap's own fate follows theirs.
+print_unlisted() {
+  local entries=$1 kind name tap line remove from
+  [[ -n $entries ]] || return 0
+  printf '\n%s\n' "Homebrew: installed but not listed — keep or remove each"
+  while read -r kind name; do
+    [[ $kind == tap ]] && continue
+    local lines=()
+    tap=''
+    [[ $name == */*/* ]] && tap=${name%/*}
+    if [[ -n $tap ]] && grep -qx "tap $tap" <<<"$entries"; then lines+=("tap \"$tap\""); fi
+    case $kind in
+      formula)
+        # A formula from a third-party tap needs trusting before brew loads it.
+        line="brew \"$name\""
+        [[ -n $tap ]] && line+=", trusted: true"
+        remove="brew uninstall $name"
+        ;;
+      cask)
+        line="cask \"$name\""
+        remove="brew uninstall --cask $name"
+        ;;
+      *)
+        printf '\n  %s %s\n' "$kind" "$name"
+        continue
+        ;;
+    esac
+    lines+=("$line")
+    print_keep_remove "$kind $name" "$remove" "${lines[@]}"
+  done <<<"$entries"
+  while read -r kind name; do
+    [[ $kind == tap ]] || continue
+    from=$(awk -v tap="$name/" 'index($2, tap) == 1 { printf "%s%s", sep, $2; sep = ", " }' <<<"$entries")
+    if [[ -n $from ]]; then
+      printf '\n  tap %s\n' "$name"
+      printf '    kept along with any formula or cask from it that you keep\n'
+      printf '    remove:               brew untap %s, after removing %s\n' "$name" "$from"
+    else
+      print_keep_remove "tap $name" "brew untap $name" "tap \"$name\""
+    fi
+  done <<<"$entries"
+}
+
+print_plan() {
+  local files=$chezmoi_items
+  if [[ $chezmoi_config_stale == yes ]]; then
+    files+="${files:+$'\n'}chezmoi's config is from an older config template (undecided: \`chezmoi init\` regenerates it)"
+  fi
+  print_section "Repo: commits the checkout lacks" "$behind_items"
+  print_section "Files" "$files"
+  if [[ -n $chezmoi_diff ]]; then printf '\n%s\n' "$chezmoi_diff"; fi
+  print_section "Homebrew: listed but not installed" "$missing_items"
+  print_unlisted "$brew_items"
+  print_section "Runtimes" "$mise_items"
+  print_section "macOS settings" "$macos_items"
+  print_section "Apps hooks" "$hooks_items"
+  print_section "Homebrew: upgrades available" "$outdated_items"
+
+  local check result detail
+  while IFS=$'\t' read -r check result; do
+    [[ $result == error ]] || continue
+    detail=$(check_detail "$check")
+    printf "\nCheck '%s' failed: %s\n" "$check" "$(head -n 1 <<<"$detail")" >&2
+    tail -n +2 <<<"$detail" | sed 's/^/  /' >&2
+  done < <(check_table)
+  # A warning counts toward nothing.
+  [[ -n $macos_notes ]] && warn "$macos_notes"
+  if [[ -e $old_local_brewfile ]]; then
+    warn "macelium does not read ~/.Brewfile.local: move it to ~/.config/macelium/Brewfile.local"
+  fi
+  print_warnings
+
+  local change undecided upgrade commits failed line=Plan
+  change=$(items_to_change) undecided=$(items_undecided)
+  upgrade=$(count_lines "$outdated_items") commits=$(count_lines "$behind_items")
+  failed=$(failed_checks)
+  echo
+  if ((change + upgrade + undecided + commits == 0)) && [[ -z $failed ]]; then
+    echo "No changes."
+    return
+  fi
+  [[ -n $failed ]] && line="Partial plan (error)"
+  line+=": $change to change, $upgrade to upgrade, $undecided undecided."
+  ((commits > 0)) && line+=" Behind $upstream by $(commits_phrase "$commits")."
+  printf '%s\n' "$line"
+}
+
+# Prints why on failure, so the reason joins the run's one log line.
+notify() {
+  local out status
+  out=$(osascript \
+    -e 'on run argv' \
+    -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
+    -e 'end run' \
+    "$1" "$2" 2>&1)
+  status=$?
+  ((status == 0)) || detail_line "$(failure_detail osascript "$out" "$status")"
+  return "$status"
+}
+
+# Takes plan's exit status.
+print_log_line() {
+  local status=$1 message failed notified=no notify_detail=''
+  if ((status != 0)); then
+    message="Run \`macelium plan\`."
+    failed=$(failed_checks)
+    [[ -n $failed ]] && message+=" Failed checks: $failed."
+    if notify_detail=$(notify "Macelium drift" "$message"); then notified=yes; else notified=failed; fi
+  fi
+
+  local line errors='' check result detail
+  line=$(date +%Y-%m-%dT%H:%M:%S%z)
+  while IFS=$'\t' read -r check result; do
+    line+=" $check=$result"
+    detail=$(check_detail "$check")
+    [[ -n $detail ]] && errors+=" ${check}_error=$(printf '%q' "$(detail_line "$detail")")"
+  done < <(check_table)
+  line+=" notified=$notified$errors"
+  [[ -n $notify_detail ]] && line+=" notify_error=$(printf '%q' "$notify_detail")"
+  printf '%s\n' "$line"
+}
+
+plan() {
+  local mode=full attempts=1 status
+  (($# <= 1)) || usage
+  case "${1:-}" in
+    '') ;;
+    --notify) mode=notify attempts=$notify_fetch_attempts ;;
+    *) usage ;;
+  esac
+  find_checkout
+  # The agent's run goes on, so the failure reaches its log and notification.
+  if [[ $manifest_failed == yes && $mode == full ]]; then
+    printf 'macelium plan: %s\n' "$repo_detail" >&2
+    return 1
+  fi
+  fetch_and_check_behind "$attempts"
+  check_machine "$mode"
+  plan_status
+  status=$?
+  if [[ $mode == notify ]]; then
+    print_log_line "$status"
+  else
+    print_plan
+  fi
+  return "$status"
+}
+
+# Takes the question and the answer an empty reply gives, yes or no. Asks on
+# the terminal, since chezmoi apply runs some prompts with stdin elsewhere.
+# Only y or yes, in any case, says yes; any other reply, or none, says no.
+confirm() {
+  local hint='[y/N]' answer=''
+  [[ $2 == yes ]] && hint='[Y/n]'
+  printf '%s %s ' "$1" "$hint" >/dev/tty
+  read -r answer </dev/tty || return 1
+  case $answer in
+    '') [[ $2 == yes ]] ;;
+    [yY] | [yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prints the command, then runs it.
+run_step() {
+  printf '\n==> %s\n' "$*"
+  "$@" && return 0
+  stop_apply "$* failed"
+  return 1
+}
+
+# Takes why apply stopped, and prints it after the warnings, as its last line.
+stop_apply() {
+  print_warnings
+  printf '\nmacelium apply: stopped: %s\n' "$1" >&2
+}
+
+apply() {
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "macelium apply: needs a terminal for its prompts" >&2
+    return 1
+  fi
+  find_checkout
+  if [[ $manifest_failed == yes ]]; then
+    printf 'macelium apply: %s\n' "$repo_detail" >&2
+    return 1
+  fi
+  fetch_and_check_behind 1
+  if [[ $behind_result == drift ]]; then
+    printf 'The checkout is behind %s by %s:\n' "$upstream" "$(commits_phrase "$(count_lines "$behind_items")")"
+    printf '%s\n' "$behind_items" | sed 's/^/  /'
+    if confirm "Pull them first?" yes; then
+      git -C "$repo" pull --ff-only || return 1
+      check_behind
+    fi
+  fi
+  check_machine full
+  print_plan
+  if [[ -n $(failed_checks) ]]; then
+    echo "No changes made."
+    return 1
+  fi
+  local change upgrades scope=''
+  change=$(items_to_change)
+  upgrades=$(count_lines "$outdated_items")
+  if ((change + upgrades == 0)); then
+    echo "Nothing to apply."
+    return 0
+  fi
+  ((change > 0)) && scope="$change to change"
+  ((upgrades > 0)) && scope+="${scope:+ and }$upgrades to upgrade"
+  echo
+  if ! confirm "Apply the $scope?" no; then
+    echo "No changes made."
+    return 0
+  fi
+  # Without an upgrade in the plan, no step upgrades, a state repo's chezmoi
+  # script that runs brew bundle included.
+  ((upgrades > 0)) || export HOMEBREW_BUNDLE_NO_UPGRADE=1
+  run_step chezmoi apply --force || return 1
+  if [[ -e $state_brewfile ]]; then
+    run_step brew bundle --file="$state_brewfile" || return 1
+    if [[ -f $local_brewfile ]]; then
+      run_step brew bundle --file="$local_brewfile" || return 1
+    fi
+  fi
+  run_step mise -C "$HOME" install || return 1
+  if [[ -n $macos_items ]]; then
+    printf '\n==> %s\n' "macOS settings"
+    if ! write_settings when-writing; then
+      stop_apply "$macos_detail"
+      return 1
+    fi
+    [[ $settings_written == yes ]] || echo "No macOS settings differ any more."
+  fi
+  if [[ -n $hooks_items ]]; then
+    printf '\n==> %s\n' "Apps hooks"
+    if ! run_apps_hooks; then
+      stop_apply "an apps hook failed"
+      return 1
+    fi
+  fi
+  print_warnings
+  echo
+  print_outcome "Apply complete"
+}
+
+settings_command() {
+  case $# in
+    0) find_checkout ;;
+    2) [[ $1 == --file ]] || usage; settings_file=$2 ;;
+    *) usage ;;
+  esac
+  if ! write_settings always; then
+    print_warnings
+    printf '\nmacelium settings: stopped: %s\n' "$macos_detail" >&2
+    return 1
+  fi
+  print_warnings
+  if [[ $macos_result == skipped ]]; then
+    print_outcome "No settings list in the state repo"
+  elif [[ $settings_written == yes ]]; then
+    print_outcome "macOS settings applied"
+  else
+    print_outcome "No macOS settings differ"
+  fi
+}
+
+## Bootstrap
+
+bootstrap_log="$HOME/Library/Logs/macelium-bootstrap.log"
+# Listing it needs Full Disk Access: it holds the system's privacy database.
+full_disk_access_probe='/Library/Application Support/com.apple.TCC'
+
+# Set by check_preflight: each problem that stops the bootstrap and its fix,
+# a paragraph each.
+preflight_problems=''
+# How to run the bootstrap again, set by bootstrap.
+rerun=''
+
+# Set by record_step: each step and how it ended, tab-separated, a line each.
+step_results=''
+
+# Prints the name of the app running this shell, from the bundle identifier
+# macOS puts in its environment.
+terminal_app() {
+  local path=''
+  if [[ -n ${__CFBundleIdentifier:-} ]]; then
+    path=$(mdfind "kMDItemCFBundleIdentifier == '$__CFBundleIdentifier'" 2>/dev/null | head -n 1)
+  fi
+  if [[ -n $path ]]; then basename "$path" .app; else echo "your terminal app"; fi
+}
+
+# Prints the path of each app brew bundle would adopt: one in /Applications
+# that a cask either Brewfile lists would install, while Homebrew has not
+# installed that cask. Returns non-zero when the casks cannot be read.
+apps_to_adopt() {
+  local casks info app
+  # grep finds no line when the Brewfiles list no cask.
+  casks=$(brewfiles | brew bundle list --cask --file=- | { grep -E '^[[:alnum:]@._/+-]+$' || true; }) || return 1
+  [[ -n $casks ]] || return 0
+  # shellcheck disable=SC2086 # one argument per cask
+  info=$(brew info --cask --json=v2 $casks) || return 1
+  # An app artifact is its source path, then options whose target, when
+  # given, is the name it is installed under.
+  jq -r '
+    .casks[] | select(.installed == null) | .artifacts[] | .app? // empty
+    | ((map(objects | .target) | first) // .[0]) | split("/") | last
+  ' <<<"$info" | while IFS= read -r app; do
+    if [[ -d /Applications/$app ]]; then echo "/Applications/$app"; fi
+  done
+}
+
+# Takes an app's path. Fails when macOS's App Management protection refuses
+# this process a change inside the bundle. A refusal by ownership is left to
+# the sudo that brew runs.
+may_change_app() {
+  local probe="$1/Contents/.macelium-bootstrap-probe" out
+  if out=$(mkdir "$probe" 2>&1); then
+    rmdir "$probe" ||
+      preflight_problem "Could not remove $probe, made to check App Management: remove it by hand."
+    return 0
+  fi
+  [[ $out != *'Operation not permitted'* ]]
+}
+
+# Takes a problem and its fix.
+preflight_problem() {
+  preflight_problems+="${preflight_problems:+$'\n'}$1"$'\n'
+}
+
+# Changes nothing. Sets preflight_problems to what needs fixing before the
+# bootstrap can run.
+check_preflight() {
+  local terminal tool errors apps app blocked='' i sandboxed=''
+  terminal=$(terminal_app)
+  for tool in chezmoi jq; do
+    command -v "$tool" >/dev/null ||
+      preflight_problem "$tool is not installed: \`brew install $tool\`."
+  done
+  errors=$(mktemp)
+  if [[ ! -e $state_brewfile ]]; then
+    :
+  elif ! apps=$(apps_to_adopt 2>"$errors"); then
+    preflight_problem "Could not list the apps Homebrew would take over, to check that it may:"$'\n'"$(cat "$errors")"
+  else
+    while IFS= read -r app; do
+      [[ -n $app ]] || continue
+      may_change_app "$app" || blocked+="  $(basename "$app" .app)"$'\n'
+    done <<<"$apps"
+    if [[ -n $blocked ]]; then
+      preflight_problem "These apps are pre-installed and Homebrew needs to take over installation:"$'\n\n'"${blocked}"$'\n'"You can resolve this in one of two ways:"$'\n\n'"  1. uninstall them by deleting them from /Applications (your user data will be preserved and Homebrew will install fresh copies)"$'\n'"  2. temporarily grant $terminal \"App Management\" permission (via System Settings -> Privacy & Security)"
+    fi
+  fi
+  rm -f "$errors"
+  if [[ ! -e $state_settings ]]; then
+    :
+  elif ! load_settings_list "$state_settings"; then
+    preflight_problem "$macos_detail"
+  else
+    for ((i = 0; i < ${#sandbox_app[@]}; i++)); do
+      sandboxed+="${sandboxed:+, }${sandbox_app[i]}"
+    done
+    if [[ -n $sandboxed ]] && ! ls "$full_disk_access_probe" >/dev/null 2>&1; then
+      preflight_problem "The settings list has settings for $sandboxed, which macOS sandboxes, so reading and writing them needs Full Disk Access:"$'\n\n'"  grant $terminal \"Full Disk Access\" permission (via System Settings -> Privacy & Security)"
+    fi
+  fi
+}
+
+# Asks for the password once, and keeps sudo's credentials fresh until the
+# bootstrap exits, so the casks that run sudo partway through don't ask again.
+start_sudo() {
+  local keeper
+  enable_touch_id_sudo
+  echo
+  echo "The bootstrap installs your applications, and the first run can take a long time."
+  # sudo reuses credentials it was given recently, in this terminal, without asking.
+  if ! sudo -n true 2>/dev/null; then
+    echo "You'll be asked for your password at least once, and possibly more times depending"
+    echo "on the applications being installed."
+  fi
+  echo
+  sudo -v || return 1
+  while kill -0 "$$" 2>/dev/null; do
+    sudo -n true 2>/dev/null
+    sleep 50
+  done &
+  keeper=$!
+  # shellcheck disable=SC2064 # the keeper's pid is known now
+  trap "kill $keeper 2>/dev/null" EXIT
+}
+
+# Takes a step's name and how it ended.
+record_step() {
+  step_results+="$1"$'\t'"$2"$'\n'
+}
+
+# Takes a step's name and its command. Runs the command with its output in
+# the log, showing only Homebrew's progress lines and, each minute, that it
+# is still running, and records the step.
+run_logged_step() {
+  local name=$1 out status ticker
+  shift
+  printf '\n==> %s (output in %s)\n' "$name" "$bootstrap_log"
+  printf '\n==> %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*" >>"$bootstrap_log"
+  out=$(mktemp)
+  (
+    minutes=0
+    while sleep 60; do
+      ((minutes++))
+      echo "  ... $name still running, $minutes min so far"
+    done
+  ) &
+  ticker=$!
+  "$@" 2>&1 | tee -a "$bootstrap_log" "$out" |
+    grep --line-buffered -E '^(Tapping|Installing|Upgrading) |has failed!$'
+  status=${PIPESTATUS[0]}
+  kill "$ticker" 2>/dev/null
+  wait "$ticker" 2>/dev/null
+  if ((status == 0)); then
+    record_step "$name" ok
+  else
+    record_step "$name" failed
+    echo "Failed, exit status $status:"
+    # brew's errors start "Error:"; without any, the end of the output says why.
+    grep '^Error: ' "$out" || tail -n 5 "$out"
+  fi
+  rm -f "$out"
+  return "$status"
+}
+
+# Takes a step's name and its command, run on the terminal, which its prompts
+# need, and records the step.
+run_terminal_step() {
+  local name=$1
+  shift
+  printf '\n==> %s\n' "$name"
+  if "$@"; then
+    record_step "$name" ok
+  else
+    record_step "$name" failed
+    return 1
+  fi
+}
+
+# Prints the state repo's notes on chezmoi init's questions, before chezmoi
+# asks them on a machine that has no chezmoi config yet.
+print_init_notes() {
+  local config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi config
+  [[ -n $state_init_notes && -f $state_init_notes ]] || return 0
+  for config in "$config_dir"/chezmoi.*; do
+    [[ -e $config ]] && return 0
+  done
+  cat "$state_init_notes"
+}
+
+# Explains the question chezmoi asks about each file edited since chezmoi
+# last wrote it, before it asks: the first status column says so.
+explain_changed_files() {
+  local changed
+  changed=$(chezmoi status --source "$repo" --exclude scripts 2>/dev/null | awk '$0 ~ /^M/ { print "  " substr($0, 4) }')
+  [[ -n $changed ]] || return 0
+  echo "These files were edited here since chezmoi last wrote them, so it asks about each:"
+  printf '%s\n' "$changed"
+  echo "Answer diff to see what the repo would change, overwrite to take the repo's version,"
+  echo "or skip to keep the edit, which macelium plan then reports until it is resolved."
+}
+
+# Prints the manual steps, those the machine shows undone first.
+print_remaining() {
+  local i note
+  # The shell that ran the bootstrap started before chezmoi wrote its config.
+  echo "Run \`exec zsh -l\`, so this shell reads its new config."
+  if [[ -e $state_settings ]] && load_settings_list "$state_settings"; then
+    for ((i = 0; i < ${#sandbox_domain[@]}; i++)); do
+      probe_sandbox "$i"
+      note=$(sandbox_note "$i")
+      [[ -n $note ]] && echo "$note."
+    done
+  fi
+  echo "Open each newly installed app once, granting the permissions it asks for."
+  local steps
+  for steps in "$state_apps"/*/manual-steps; do
+    [[ -f $steps ]] && grep -v '^[[:space:]]*$' "$steps"
+  done
+  echo "Enter license keys, and set login items."
+}
+
+# Runs write_settings as a step of its own, with its warnings and why it
+# stopped in the step's output.
+settings_step() {
+  if ! write_settings when-writing; then
+    print_warnings
+    printf 'stopped: %s\n' "$macos_detail" >&2
+    return 1
+  fi
+  print_warnings
+}
+
+# Takes the checkout to set up from, or none for the one chezmoi's config
+# names.
+bootstrap() {
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "macelium bootstrap: needs a terminal for its prompts" >&2
+    return 1
+  fi
+  if ! command -v brew >/dev/null; then
+    local prefix
+    for prefix in /opt/homebrew /usr/local; do
+      [[ -x $prefix/bin/brew ]] && break
+    done
+    if [[ ! -x $prefix/bin/brew ]]; then
+      echo "macelium bootstrap: Homebrew is not installed: see https://brew.sh" >&2
+      return 1
+    fi
+    eval "$("$prefix/bin/brew" shellenv bash)"
+  fi
+  rerun='macelium bootstrap'
+  if (($# == 1)); then
+    local dir
+    if ! dir=$(cd "$1" 2>/dev/null && pwd -P); then
+      echo "macelium bootstrap: no directory $1" >&2
+      return 1
+    fi
+    use_checkout "$dir"
+    rerun+=" $(printf '%q' "$dir")"
+  else
+    find_checkout
+  fi
+  if [[ -z $repo ]]; then
+    echo "macelium bootstrap: $repo_detail" >&2
+    return 1
+  fi
+
+  echo "Checking what the bootstrap needs from macOS..."
+  check_preflight
+  if [[ -n $preflight_problems ]]; then
+    printf '\n%s' "$preflight_problems" >&2
+    return 1
+  fi
+
+  start_sudo || {
+    echo "macelium bootstrap: stopped: sudo failed" >&2
+    return 1
+  }
+  mkdir -p "$(dirname "$bootstrap_log")"
+
+  print_init_notes
+  run_terminal_step "chezmoi init" chezmoi init --source "$repo" || {
+    print_warnings
+    echo "macelium bootstrap: stopped: chezmoi init failed" >&2
+    return 1
+  }
+  # Each script and step is its own, so one that fails stops none after it,
+  # and chezmoi records each script that succeeds as run.
+  explain_changed_files
+  run_terminal_step "Files" chezmoi apply --source "$repo" --exclude scripts
+  local script
+  for script in $(chezmoi managed --source "$repo" --include scripts); do
+    run_logged_step "$script" chezmoi apply --source "$repo" "$HOME/$script"
+  done
+  if [[ -e $state_brewfile ]]; then
+    run_logged_step "brew bundle" brew bundle --file="$state_brewfile"
+    if [[ -f $local_brewfile ]]; then
+      run_logged_step "brew bundle (this machine)" brew bundle --file="$local_brewfile"
+    fi
+  fi
+  run_logged_step "mise install" mise -C "$HOME" install
+  if [[ -e $state_settings ]]; then
+    run_logged_step "macOS settings" settings_step
+  fi
+  # Hooks that ran on an earlier bootstrap are skipped, as a finished step.
+  check_hooks
+  case $hooks_result in
+    drift) run_logged_step "Apps hooks" run_apps_hooks ;;
+    error)
+      record_step "Apps hooks" failed
+      printf '\n==> Apps hooks\n%s\n' "$hooks_detail"
+      ;;
+  esac
+
+  printf '\n==> Differences from the repo (macelium plan)\n'
+  # plan compares the machine with the checkout chezmoi's config names, so
+  # after applying another, such as a worktree, it would list their difference.
+  local applied=$repo
+  find_checkout
+  if [[ $repo != "$applied" ]]; then
+    echo "Skipped: this bootstrap ran from $applied, and macelium plan only checks $repo."
+  else
+    echo "Packages installed but not listed predate the bootstrap: list, keep or remove each."
+    # Its warnings print within it; the bootstrap's own print at the end.
+    (warnings='' && plan)
+  fi
+  repo=$applied
+
+  local failed
+  printf '\nSteps:\n'
+  printf '%s' "$step_results" | awk -F '\t' '{ printf "  %-7s %s\n", $2, $1 }'
+  failed=$(grep -c $'\tfailed$' <<<"$step_results")
+  printf '\nManual steps:\n'
+  print_remaining | sed 's/^/  - /'
+  print_warnings
+  echo
+  if ((failed > 0)); then
+    echo "Bootstrap finished with $failed failed: fix what is shown above, or in $bootstrap_log, and run \`$rerun\` again; finished steps are skipped."
+    return 1
+  fi
+  print_outcome "Bootstrap complete"
+}
+
+usage() {
+  echo "usage: macelium bootstrap [<checkout>] | macelium plan [--notify] | macelium apply | macelium settings [--file <path>]" >&2
+  exit 1
+}
+
+# Sourced, as the tests do to reach one function, it defines and runs nothing.
+[[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
+
+case "${1:-}" in
+  bootstrap)
+    shift
+    (($# <= 1)) || usage
+    bootstrap "$@"
+    ;;
+  plan)
+    shift
+    plan "$@"
+    ;;
+  apply)
+    shift
+    (($# == 0)) || usage
+    apply
+    ;;
+  settings)
+    shift
+    settings_command "$@"
+    ;;
+  *) usage ;;
+esac

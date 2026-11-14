@@ -1,0 +1,6 @@
+#!/bin/bash
+# Runs after the other steps, and again whenever this file, the watches list
+# or what it names changes. A real hook reloads an app's config.
+set -euo pipefail
+mkdir -p "$HOME/Library/Caches/macelium-example"
+cp "$HOME/.config/macelium-example/greeting" "$HOME/Library/Caches/macelium-example/"

@@ -1,0 +1,16 @@
+#!/bin/bash
+# Records the call. source-path names $STUB_SOURCE_PATH, and status prints
+# $STUB_CHEZMOI_STATUS.
+echo "chezmoi $*" >>"$STUB_LOG"
+case ${1:-} in
+  source-path)
+    if [[ -z ${STUB_SOURCE_PATH:-} ]]; then
+      echo "chezmoi: no source directory" >&2
+      exit 1
+    fi
+    printf '%s\n' "$STUB_SOURCE_PATH"
+    ;;
+  status) printf '%s' "${STUB_CHEZMOI_STATUS:-}" ;;
+  init) echo "STUB chezmoi init" ;;
+esac
+exit 0

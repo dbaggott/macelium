@@ -1,0 +1,67 @@
+# The ci-required check the account's branch protection requires. The job id
+# is the check name, so the job takes no `name:`, and the workflow takes no
+# `paths` filter so the check reports on every pull request.
+#
+# The checks but the example's bootstrap are in .github/check.sh, which runs
+# locally too.
+
+name: CI
+
+on:
+  pull_request:
+    # `ready_for_review` runs CI when a draft is marked ready; the job skips while it is one.
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ci-required:
+    if: github.event.pull_request.draft == false
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # gitleaks reads the pull request's commits from history.
+          fetch-depth: 0
+
+      # chezmoi and mise are what macelium needs from Homebrew besides jq,
+      # which the runner has.
+      - name: Install chezmoi, mise, gitleaks and shellcheck
+        run: brew install chezmoi mise gitleaks shellcheck
+
+      - name: Run the checks
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/check.sh "$BASE_SHA..$HEAD_SHA"
+
+      # bootstrap needs a terminal, so it runs under script's. The example
+      # becomes a clone of a local bare repo, so its checkout has an upstream.
+      - name: Bootstrap the example, then plan it
+        run: |
+          set -euo pipefail
+          state="$RUNNER_TEMP/state"
+          git init -q --bare "$state.git"
+          cp -R example "$state"
+          git -C "$state" init -q -b main
+          git -C "$state" add -A
+          git -C "$state" -c user.name=ci -c user.email=ci@example.com commit -q -m example
+          git -C "$state" remote add origin "$state.git"
+          git -C "$state" push -q -u origin main
+
+          script -q /dev/null "$GITHUB_WORKSPACE/macelium" bootstrap "$state" </dev/null
+
+          # plan exits 2 here: the runner has Homebrew packages the example
+          # does not list. Only 1, a failed check, fails the job.
+          status=0
+          script -q /dev/null "$GITHUB_WORKSPACE/macelium" plan </dev/null || status=$?
+          echo "plan exited $status"
+          [[ $status != 1 ]]
