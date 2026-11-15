@@ -21,9 +21,6 @@ contract than its own.
   it.
 - `bootstrap` runs a chezmoi script whose path holds a space, rather than
   splitting the path into steps that apply nothing.
-- README.md says the manifest's and settings list's check reads each line's
-  first word and the file is then sourced, so it catches mistakes, not
-  hostile content.
 
 ## 0.2.1
 
