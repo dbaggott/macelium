@@ -37,3 +37,15 @@ test_bootstrap_skips_init_notes_with_a_chezmoi_config() {
   assert_contains "$out" "STUB chezmoi init"
   assert_not_contains "$out" "NOTES:"
 }
+
+test_bootstrap_applies_a_script_whose_path_has_a_space() {
+  make_state macelium.conf $'contract 1\n'
+  export STUB_CHEZMOI_MANAGED=$'.local/run once/setup.sh\n.local/other.sh\n'
+  run_tty -- "$tool" bootstrap "$state"
+  # The log joins arguments with spaces, so it shows a split path as one
+  # apply line for each fragment.
+  local applies
+  applies=$(grep "^chezmoi apply --source $state $HOME/" "$STUB_LOG")
+  [[ $applies == "chezmoi apply --source $state $HOME/.local/run once/setup.sh"$'\n'"chezmoi apply --source $state $HOME/.local/other.sh" ]] ||
+    fail "the scripts' apply lines are:"$'\n'"$applies"
+}

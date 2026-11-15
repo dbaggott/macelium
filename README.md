@@ -102,10 +102,13 @@ Each path is relative to the state repo's root.
 
 macelium reads the `contract` line before any other. A contract newer than
 its own makes every command exit 1, before any check runs, with a message to
-upgrade macelium. Under a contract it knows, a line that is not
-one of these declarations, a comment or a blank refuses the manifest unrun,
-the same way. `plan --notify` writes a refusal to its log line, and posts a
-notification that the manifest was refused.
+upgrade macelium. Under a contract it knows, a line whose first word is not
+one of these declarations, and that is not a comment or a blank, refuses the
+manifest unrun, the same way. `plan --notify` writes a refusal to its log
+line, and posts a notification that the manifest was refused. The check reads
+only the first word of each line that does not continue another, and the
+manifest is then sourced as shell, so it catches mistakes, not hostile content: a state repo is trusted as much as the
+chezmoi scripts it runs.
 
 ```
 contract 1
@@ -116,8 +119,10 @@ init_notes init-notes.txt
 
 The settings list is the macOS settings every machine has, a declaration a
 line, with `#` comments; a line ending in `\` continues on the next. Like the
-manifest, a list holding any other line, such as a `defaults write`, is
-refused unrun.
+manifest, a list holding a line whose first word is not a declaration, such
+as a `defaults write`, is refused unrun. Its check is the
+manifest's, and the list is then sourced as shell, so it too catches
+mistakes, not hostile content.
 
 - `setting [--current-host] <domain> <key> <type> <value>...`: a defaults
   key. `<domain>` is a defaults domain, or `-g` for the global one. `<type>`
@@ -231,8 +236,10 @@ that read them.
 ## Files on the machine
 
 - `~/.config/macelium/Brewfile.local`: packages for this machine only, read
-  after the state repo's Brewfile. `plan` warns while `~/.Brewfile.local`,
-  which macelium doesn't read, exists.
+  after the state repo's Brewfile, and only alongside it: with no state repo
+  Brewfile, `plan` warns that the local file's packages are not checked or
+  installed. `plan` also warns while `~/.Brewfile.local`, which macelium
+  doesn't read, exists.
 - `~/.local/state/macelium/apps-hooks.sha256`: the hash the apps hooks last
   all succeeded at.
 - `~/Library/Logs/macelium-bootstrap.log`: each bootstrap step's output.

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Records the call. source-path names $STUB_SOURCE_PATH, and status prints
-# $STUB_CHEZMOI_STATUS.
+# Records the call. source-path names $STUB_SOURCE_PATH, status prints
+# $STUB_CHEZMOI_STATUS, and managed prints $STUB_CHEZMOI_MANAGED.
 echo "chezmoi $*" >>"$STUB_LOG"
 case ${1:-} in
   source-path)
@@ -11,6 +11,7 @@ case ${1:-} in
     printf '%s\n' "$STUB_SOURCE_PATH"
     ;;
   status) printf '%s' "${STUB_CHEZMOI_STATUS:-}" ;;
+  managed) printf '%s' "${STUB_CHEZMOI_MANAGED:-}" ;;
   init) echo "STUB chezmoi init" ;;
 esac
 exit 0
