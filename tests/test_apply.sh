@@ -125,3 +125,14 @@ test_apply_with_another_formula_outdated_does_not_upgrade_itself() {
   assert_not_contains "$STUB_LOG" "upgraded macelium"
   assert_contains "$STUB_LOG" "brew bundle --file=$state/Brewfile"
 }
+
+test_apply_stops_when_the_upgraded_macelium_is_not_under_the_prefix() {
+  make_outdated_self
+  export STUB_BREW_PREFIX=$sandbox/empty-prefix
+  run_tty y -- "$tool" apply
+  assert_status 1
+  assert_order "$STUB_LOG" "brew upgrade macelium" "brew --prefix"
+  assert_contains "$out" "stopped: macelium was upgraded, but not found under brew --prefix to run"
+  assert_not_contains "$STUB_LOG" "chezmoi apply"
+  assert_not_contains "$STUB_LOG" "brew bundle --file"
+}

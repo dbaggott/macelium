@@ -20,8 +20,8 @@ contract than its own.
 
 - `apply` upgrades macelium itself first when the plan lists it, then hands
   over to the upgraded version, which prints its own plan and asks again
-  (README.md, "Commands"). A failed upgrade stops `apply` with nothing else
-  changed.
+  (README.md, "Commands"). A failed upgrade stops `apply` before any other
+  step.
 
 ## 0.1.0
 
