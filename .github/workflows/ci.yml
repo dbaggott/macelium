@@ -77,6 +77,10 @@ jobs:
       # installer clones, and git reads it without a sign-in. The runner has
       # Homebrew. A second run must skip every step but the bootstrap.
       - name: Install from the example with install.sh, then again
+        env:
+          # On a terminal, brew install asks before installing; script's
+          # terminal here has no one to answer.
+          HOMEBREW_NO_ASK: 1
         run: |
           set -euo pipefail
           brew services stop macelium
