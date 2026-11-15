@@ -16,6 +16,11 @@ contract than its own.
 
 ## Unreleased
 
+- The state repo's Brewfile line for macelium is now
+  `brew "dbaggott/tap/macelium", trusted: true, restart_service: :always`
+  (README.md, "The Brewfile's macelium line"). With `start_service: true`,
+  every `brew bundle` after the first fails, so change a line that has it.
+
 ## 0.2.0
 
 - `apply` upgrades macelium itself first when the plan lists it, then hands

@@ -54,7 +54,7 @@ test_apply_rereads_the_manifest_after_pulling() {
 # leads, a macelium that records how it was run.
 make_outdated_self() {
   make_state macelium.conf $'contract 1\n' \
-    Brewfile $'brew "dbaggott/tap/macelium", trusted: true, start_service: true\n' "$@"
+    Brewfile $'brew "dbaggott/tap/macelium", trusted: true, restart_service: :always\n' "$@"
   export STUB_BREW_OUTDATED='Formula dbaggott/tap/macelium'
   export STUB_BREW_PREFIX=$sandbox/prefix
   mkdir -p "$STUB_BREW_PREFIX/bin"

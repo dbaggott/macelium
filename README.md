@@ -14,6 +14,30 @@ shape of terraform's plan and apply:
 
 It needs macOS, Homebrew, chezmoi, mise and jq.
 
+## Install
+
+On a new Mac, paste this into Terminal, with your state repo's GitHub
+`<owner>/<repo>`, and follow what it asks:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dbaggott/macelium/main/install.sh | bash -s <owner>/<repo> [<path>]
+```
+
+`<path>` is where the state repo is cloned, `~/git/<repo>` unless given.
+[`install.sh`](install.sh), in order:
+
+1. installs Homebrew, when neither `/opt/homebrew` nor `/usr/local` holds it
+2. installs macelium, `brew install dbaggott/tap/macelium`
+3. when the state repo can't be read without signing in, signs in to GitHub
+   with `gh auth login`, unless `gh` already is, and runs
+   `gh auth setup-git`, so git can fetch it
+4. clones the state repo to `<path>`
+5. runs `macelium bootstrap <path>`, and exits with its status.
+
+It skips each step already done, so pasting it again picks up where it
+stopped. It refuses a `<path>` that holds anything but a clone of the state
+repo, before changing anything.
+
 ## The state repo
 
 A state repo is a git checkout with an upstream. At its root:
@@ -47,13 +71,18 @@ sourceDir = {{ .chezmoi.workingTree | quote }}
 The state repo's Brewfile lists macelium itself:
 
 ```ruby
-brew "dbaggott/tap/macelium", trusted: true, start_service: true
+brew "dbaggott/tap/macelium", trusted: true, restart_service: :always
 ```
 
 - `trusted: true`, because Homebrew won't load a formula from a third-party
   tap through a Brewfile line without it.
-- `start_service: true`, because the daily drift check is the formula's
-  service, and this starts it.
+- `restart_service: :always`, because the daily drift check is the formula's
+  service, and this starts it. It isn't `start_service: true`: for a line
+  naming its tap, `brew bundle` tries to start the service on every run, and
+  starting it again once it is loaded fails, so every `brew bundle` after the
+  first would fail. A restart unloads the service before loading it again.
+  `restart_service: :changed`, which `brew bundle dump` writes, fails the
+  same way when nothing changed.
 
 Without the line, `plan` reports macelium as installed but not listed, and no
 drift check runs.
