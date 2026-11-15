@@ -1,13 +1,32 @@
 #!/bin/bash
 # Records the call, reading any Brewfile on stdin. `bundle cleanup` lists $STUB_BREW_UNLISTED, a formula a
-# line, as installed but not listed; every other check finds nothing.
+# line, as installed but not listed; `bundle check` without --no-upgrade lists $STUB_BREW_OUTDATED, an entry
+# a line as brew bundle check names it ("Formula <name>"), as having an upgrade; every other check finds
+# nothing. `upgrade` fails when $STUB_BREW_UPGRADE_FAILS is set, and `--prefix` prints $STUB_BREW_PREFIX.
 echo "brew $*" >>"$STUB_LOG"
 for arg in "$@"; do
   if [[ $arg == --file=- ]]; then cat >/dev/null; fi
 done
 case ${1:-} in
+  --prefix)
+    echo "${STUB_BREW_PREFIX:?}"
+    ;;
+  upgrade)
+    if [[ -n ${STUB_BREW_UPGRADE_FAILS:-} ]]; then
+      echo "Error: $2: the upgrade failed" >&2
+      exit 1
+    fi
+    ;;
   bundle)
     case ${2:-} in
+      check)
+        if [[ -n ${STUB_BREW_OUTDATED:-} && " $* " != *" --no-upgrade "* ]]; then
+          while IFS= read -r entry; do
+            echo "→ $entry needs to be installed or updated."
+          done <<<"$STUB_BREW_OUTDATED"
+          exit 1
+        fi
+        ;;
       cleanup)
         if [[ -n ${STUB_BREW_UNLISTED:-} ]]; then
           echo "Would uninstall formulae:"

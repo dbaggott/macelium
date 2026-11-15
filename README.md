@@ -163,6 +163,17 @@ is partial and `apply` stops without asking. It never removes anything: a
 package installed but not listed stays until it is listed or uninstalled by
 hand. It needs a terminal.
 
+When the plan lists macelium itself under the upgrades, `apply` upgrades it
+first, on the same yes: it runs `brew upgrade macelium` before any other
+step, then hands over to the upgraded macelium's `apply`, run from
+`$(brew --prefix)/bin/macelium` with `MACELIUM_UPGRADED_FROM` set to the old
+version. The new version prints its own plan and asks again, and what it
+applies is what it showed. While `MACELIUM_UPGRADED_FROM` is set, `apply`
+never upgrades itself, so a macelium still listed then, from a stale tap, is
+left to `brew bundle` with the rest. When
+`brew upgrade macelium` fails, `apply` prints its output and
+`No changes made.`, and exits 1, having run no other step.
+
 **`bootstrap`** sets up a machine from `<checkout>`, which must hold
 `macelium.conf`, or else from the checkout chezmoi's config names. It can run
 again at any point after. It first checks what it needs from macOS, App

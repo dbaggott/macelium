@@ -24,7 +24,9 @@
 # then writes the macOS settings that still differ, and runs the apps' hooks,
 # each when the plan listed it. When a check failed, the plan is partial and
 # apply stops without asking. It never removes anything: a package installed
-# but not listed stays until it is listed or uninstalled by hand.
+# but not listed stays until it is listed or uninstalled by hand. When the
+# plan lists macelium itself to upgrade, apply upgrades it before any other
+# step and hands over to the new version's apply, which plans and asks again.
 #
 # bootstrap sets up a machine from a checkout, the one named or else the one
 # chezmoi's config names, before anything is applied or again at any point
@@ -49,7 +51,10 @@
 set -uo pipefail
 
 # A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.1.0"
+VERSION="0.2.0"
+# How brew bundle check names macelium in a state repo's Brewfile, whose line
+# for it README.md ("The Brewfile's macelium line") gives.
+self_formula=dbaggott/tap/macelium
 
 # brew bundle runs brew update first unless this is set, which in apply would
 # upgrade past what the plan showed; update_homebrew runs it instead.
@@ -706,6 +711,13 @@ sandbox_note() {
   esac
 }
 
+# The EXIT trap export_domain sets, which an exec skips, so upgrade_self runs
+# it first.
+remove_export_dir() {
+  if [[ -n $export_dir ]]; then rm -rf "$export_dir"; fi
+  export_dir=''
+}
+
 # Takes current or nothing, and a domain. Sets export_file to the domain
 # exported as a plist, once per pass of check_macos. Returns non-zero, with macos_detail set,
 # when defaults cannot export it.
@@ -716,7 +728,7 @@ export_domain() {
       macos_detail="mktemp -d failed"
       return 1
     }
-    trap 'rm -rf "$export_dir"' EXIT
+    trap remove_export_dir EXIT
   fi
   export_file="$export_dir/$export_pass-${host:+$host-}$domain.plist"
   [[ -f $export_file ]] && return 0
@@ -1430,10 +1442,35 @@ stop_apply() {
   printf '\nmacelium apply: stopped: %s\n' "$1" >&2
 }
 
+# Upgrades macelium, then replaces this process with the upgraded command's
+# apply, which plans and asks again, so what gets applied is what the version
+# applying it showed. Returns 1, having changed nothing else, when the upgrade
+# fails. MACELIUM_UPGRADED_FROM stops the new apply doing the same again.
+upgrade_self() {
+  local prefix
+  printf '\n==> %s\n' "brew upgrade macelium"
+  if ! brew upgrade macelium; then
+    echo "No changes made."
+    return 1
+  fi
+  # $0 can name the old keg's path, which the upgrade has replaced.
+  if ! prefix=$(brew --prefix) || [[ ! -x $prefix/bin/macelium ]]; then
+    stop_apply "macelium was upgraded, but not found under brew --prefix to run"
+    return 1
+  fi
+  remove_export_dir
+  trap - EXIT
+  export MACELIUM_UPGRADED_FROM=$VERSION
+  exec "$prefix/bin/macelium" apply
+}
+
 apply() {
   if [[ ! -t 0 || ! -t 1 ]]; then
     echo "macelium apply: needs a terminal for its prompts" >&2
     return 1
+  fi
+  if [[ -n ${MACELIUM_UPGRADED_FROM:-} ]]; then
+    printf 'macelium was upgraded from %s to %s, and plans again.\n\n' "$MACELIUM_UPGRADED_FROM" "$VERSION"
   fi
   find_checkout
   if [[ $manifest_failed == yes ]]; then
@@ -1474,6 +1511,9 @@ apply() {
   if ! confirm "Apply the $scope?" no; then
     echo "No changes made."
     return 0
+  fi
+  if [[ -z ${MACELIUM_UPGRADED_FROM:-} ]] && grep -qxF "Formula $self_formula" <<<"$outdated_items"; then
+    upgrade_self || return 1
   fi
   # Without an upgrade in the plan, no step upgrades, a state repo's chezmoi
   # script that runs brew bundle included.
