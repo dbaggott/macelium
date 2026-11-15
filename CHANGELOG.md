@@ -15,7 +15,13 @@ contract than its own.
 
 ## Unreleased
 
+## 0.1.0
+
 - macelium, published from the `dotfiles` command it was: the state repo it
   applies is named by a manifest, and macelium runs `brew bundle`,
   `mise install`, the settings and the apps hooks itself, with no chezmoi
   script in the state repo.
+- `macelium --version`.
+- Released to `dbaggott/homebrew-tap` as `macelium`, whose formula's service
+  runs `macelium plan --notify` daily at 09:00, logging to
+  `~/Library/Logs/macelium-drift.log`.
