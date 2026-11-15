@@ -1,6 +1,8 @@
 #!/bin/bash
 # Records the call. source-path names $STUB_SOURCE_PATH, status prints
-# $STUB_CHEZMOI_STATUS, and managed prints $STUB_CHEZMOI_MANAGED.
+# $STUB_CHEZMOI_STATUS, and managed prints $STUB_CHEZMOI_MANAGED. With
+# $STUB_CHEZMOI_APPLY_READS set, apply reads a line from stdin and from fd 3,
+# as a script might, and records each it gets.
 echo "chezmoi $*" >>"$STUB_LOG"
 case ${1:-} in
   source-path)
@@ -13,5 +15,11 @@ case ${1:-} in
   status) printf '%s' "${STUB_CHEZMOI_STATUS:-}" ;;
   managed) printf '%s' "${STUB_CHEZMOI_MANAGED:-}" ;;
   init) echo "STUB chezmoi init" ;;
+  apply)
+    if [[ -n ${STUB_CHEZMOI_APPLY_READS:-} ]]; then
+      if read -r -t 1 line; then echo "read stdin: $line" >>"$STUB_LOG"; fi
+      if { read -r -t 1 -u 3 line; } 2>/dev/null; then echo "read fd 3: $line" >>"$STUB_LOG"; fi
+    fi
+    ;;
 esac
 exit 0

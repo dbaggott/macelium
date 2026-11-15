@@ -25,4 +25,8 @@ test_plan_warns_when_local_brewfile_has_no_state_brewfile() {
   run plan
   assert_status 0
   assert_contains "$err" "Warning: macelium reads ~/.config/macelium/Brewfile.local only with the state repo's Brewfile, and $state/Brewfile does not exist: its packages are not checked or installed"
+
+  echo 'brew "git"' >"$state/Brewfile"
+  run plan
+  assert_not_contains "$err" "Brewfile.local"
 }

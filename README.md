@@ -106,9 +106,9 @@ upgrade macelium. Under a contract it knows, a line whose first word is not
 one of these declarations, and that is not a comment or a blank, refuses the
 manifest unrun, the same way. `plan --notify` writes a refusal to its log
 line, and posts a notification that the manifest was refused. The check reads
-only the first word of each line that does not continue another, and the
-manifest is then sourced as shell, so it catches mistakes, not hostile content: a state repo is trusted as much as the
-chezmoi scripts it runs.
+only the word each line starts with, skipping a line that continues another,
+and the manifest is then sourced as shell, so it catches mistakes, not hostile
+content: a state repo is trusted as much as the chezmoi scripts it runs.
 
 ```
 contract 1
@@ -119,10 +119,10 @@ init_notes init-notes.txt
 
 The settings list is the macOS settings every machine has, a declaration a
 line, with `#` comments; a line ending in `\` continues on the next. Like the
-manifest, a list holding a line whose first word is not a declaration, such
-as a `defaults write`, is refused unrun. Its check is the
-manifest's, and the list is then sourced as shell, so it too catches
-mistakes, not hostile content.
+manifest, a list holding a line whose first word is not a declaration, such as
+a `defaults write`, is refused unrun. Its check is the manifest's, and the
+list is then sourced as shell, so it too catches mistakes, not hostile
+content.
 
 - `setting [--current-host] <domain> <key> <type> <value>...`: a defaults
   key. `<domain>` is a defaults domain, or `-g` for the global one. `<type>`

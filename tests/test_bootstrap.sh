@@ -49,3 +49,13 @@ test_bootstrap_applies_a_script_whose_path_has_a_space() {
   [[ $applies == "chezmoi apply --source $state $HOME/.local/run once/setup.sh"$'\n'"chezmoi apply --source $state $HOME/.local/other.sh" ]] ||
     fail "the scripts' apply lines are:"$'\n'"$applies"
 }
+
+test_bootstrap_script_reading_input_leaves_the_list_alone() {
+  make_state macelium.conf $'contract 1\n'
+  export STUB_CHEZMOI_MANAGED=$'.local/first.sh\n.local/second.sh\n' STUB_CHEZMOI_APPLY_READS=1
+  run_tty -- "$tool" bootstrap "$state"
+  assert_contains "$STUB_LOG" "chezmoi apply --source $state $HOME/.local/first.sh"
+  assert_contains "$STUB_LOG" "chezmoi apply --source $state $HOME/.local/second.sh"
+  assert_not_contains "$STUB_LOG" "read stdin: .local/"
+  assert_not_contains "$STUB_LOG" "read fd 3: .local/"
+}
