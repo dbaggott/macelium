@@ -12,8 +12,9 @@ run_installer() {
 }
 
 # A state repo that https://github.com/example/state clones; a brew whose
-# `list` fails until `install` has run; and a macelium that records its call
-# and whether stdin is a terminal, and exits $STUB_MACELIUM_STATUS.
+# `list` fails until `install` has run; a gh that records its call and fails,
+# so a test never signs in; and a macelium that records its call and whether
+# stdin is a terminal, and exits $STUB_MACELIUM_STATUS.
 installable_state() {
   make_state macelium.conf $'contract 1\n'
   git config --global url."file://$sandbox/state.git".insteadOf https://github.com/example/state
@@ -32,7 +33,12 @@ case $1 in
   list) [[ -e $STUB_LOG.installed ]] ;;
 esac
 STUB
-  chmod +x "$sandbox/bin/macelium" "$sandbox/bin/brew"
+  cat >"$sandbox/bin/gh" <<'STUB'
+#!/bin/bash
+echo "gh $*" >>"$STUB_LOG"
+exit 1
+STUB
+  chmod +x "$sandbox/bin/macelium" "$sandbox/bin/brew" "$sandbox/bin/gh"
 }
 
 test_install_refuses_without_owner_and_repo() {
@@ -67,7 +73,8 @@ test_install_installs_clones_and_bootstraps_then_resumes() {
   run_tty -- bash "$installer" example/state
   assert_status 0
   assert_contains "$STUB_LOG" "brew install dbaggott/tap/macelium"
-  assert_contains "$out" "GitHub sign-in: not needed"
+  assert_contains "$out" "GitHub sign-in: not needed, git can read example/state"
+  assert_not_contains "$STUB_LOG" "gh "
   [[ -f $HOME/git/state/macelium.conf ]] || fail "not cloned to ~/git/state"
   assert_contains "$STUB_LOG" "macelium bootstrap $HOME/git/state tty=yes"
 
@@ -81,10 +88,10 @@ test_install_installs_clones_and_bootstraps_then_resumes() {
   assert_contains "$STUB_LOG" "macelium bootstrap $HOME/git/state tty=yes"
 }
 
-test_install_takes_a_path_and_exits_with_the_bootstrap_status() {
+test_install_takes_a_path_and_a_dot_git_name_and_exits_with_the_bootstrap_status() {
   installable_state
   export STUB_MACELIUM_STATUS=3
-  run_tty -- bash "$installer" example/state "$sandbox/elsewhere"
+  run_tty -- bash "$installer" example/state.git "$sandbox/elsewhere"
   assert_status 3
   assert_contains "$STUB_LOG" "macelium bootstrap $sandbox/elsewhere tty=yes"
 }

@@ -16,8 +16,8 @@ install_macelium() {
     echo "$usage" >&2
     return 1
   fi
-  local slug=$1 url="https://github.com/$1"
-  local path=${2:-$HOME/git/${1#*/}}
+  local slug=${1%.git}
+  local url="https://github.com/$slug" path=${2:-$HOME/git/${slug#*/}}
 
   # Takes a git remote URL, and succeeds when it names $slug on GitHub, over
   # HTTPS or SSH, with or without .git. GitHub's names ignore case.
@@ -99,7 +99,7 @@ install_macelium() {
   fi
 
   if GIT_TERMINAL_PROMPT=0 git ls-remote "$url" >/dev/null 2>&1; then
-    echo "==> GitHub sign-in: not needed, $slug can be read without it"
+    echo "==> GitHub sign-in: not needed, git can read $slug"
   else
     if gh auth status --hostname github.com >/dev/null 2>&1; then
       echo "==> GitHub sign-in: gh is already signed in"
