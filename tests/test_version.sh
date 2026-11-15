@@ -1,5 +1,5 @@
 # shellcheck shell=bash disable=SC2154 # tests/lib.sh sets tool, out and status
-# --version: what the formula's test asserts, and the release reads.
+# --version: what the formula's test asserts.
 
 test_version_prints_the_version_line() {
   local version
