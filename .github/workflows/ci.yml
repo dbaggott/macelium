@@ -107,3 +107,8 @@ jobs:
               exit 1
             }
           done
+
+      # Each bootstrap step's output goes to its log, not the job's.
+      - name: Print the bootstrap log
+        if: failure()
+        run: cat ~/Library/Logs/macelium-bootstrap.log
