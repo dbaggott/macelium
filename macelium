@@ -1321,6 +1321,9 @@ print_plan() {
   if [[ -e $old_local_brewfile ]]; then
     warn "macelium does not read ~/.Brewfile.local: move it to ~/.config/macelium/Brewfile.local"
   fi
+  if [[ -f $local_brewfile && ! -e $state_brewfile ]]; then
+    warn "macelium reads ~/.config/macelium/Brewfile.local only with the state repo's Brewfile, and $state_brewfile does not exist: its packages are not checked or installed"
+  fi
   print_warnings
 
   local change undecided upgrade commits failed line=Plan
@@ -1856,10 +1859,13 @@ bootstrap() {
   # and chezmoi records each script that succeeds as run.
   explain_changed_files
   run_terminal_step "Files" chezmoi apply --source "$repo" --exclude scripts
+  # The list is on its own descriptor, so a script that reads stdin reads the
+  # terminal, not the scripts after it.
   local script
-  for script in $(chezmoi managed --source "$repo" --include scripts); do
-    run_logged_step "$script" chezmoi apply --source "$repo" "$HOME/$script"
-  done
+  while IFS= read -r -u 3 script; do
+    [[ -n $script ]] || continue
+    run_logged_step "$script" chezmoi apply --source "$repo" "$HOME/$script" 3<&-
+  done 3< <(chezmoi managed --source "$repo" --include scripts)
   if [[ -e $state_brewfile ]]; then
     run_logged_step "brew bundle" brew bundle --file="$state_brewfile"
     if [[ -f $local_brewfile ]]; then

@@ -14,6 +14,14 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## Unreleased
+
+- `plan` warns when `~/.config/macelium/Brewfile.local` exists and the state
+  repo has no Brewfile, since macelium reads the local file only alongside
+  it.
+- `bootstrap` runs a chezmoi script whose path holds a space, rather than
+  splitting the path into steps that apply nothing.
+
 ## 0.2.1
 
 - The state repo's Brewfile line for macelium is now
