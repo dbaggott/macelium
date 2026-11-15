@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # Whether the tap was written, which is what verify checks.
-      tap-written: ${{ steps.meta.outputs.new == 'true' || github.event_name == 'workflow_dispatch' }}
+      tap-written: ${{ steps.meta.outputs.write_tap }}
     steps:
       - name: Checkout macelium
         uses: actions/checkout@v7
@@ -50,14 +50,29 @@ jobs:
             exit 1
           fi
           tag="v$version"
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-            echo "Tag $tag already exists; nothing to release."
-            echo "new=false" >>"$GITHUB_OUTPUT"
-          else
-            echo "new=true" >>"$GITHUB_OUTPUT"
-          fi
-          echo "tag=$tag"         >>"$GITHUB_OUTPUT"
-          echo "version=$version" >>"$GITHUB_OUTPUT"
+          # --exit-code exits 2 when no ref matches; anything else but 0 is
+          # a failed read, not an absent tag.
+          found=0
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || found=$?
+          case $found in
+            0)
+              echo "Tag $tag already exists; nothing to release."
+              new=false
+              ;;
+            2) new=true ;;
+            *)
+              echo "::error::git ls-remote exited $found reading tag $tag"
+              exit 1
+              ;;
+          esac
+          write_tap=$new
+          [[ $GITHUB_EVENT_NAME != workflow_dispatch ]] || write_tap=true
+          {
+            echo "new=$new"
+            echo "write_tap=$write_tap"
+            echo "tag=$tag"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
 
       - name: Create tag and GitHub release
         if: steps.meta.outputs.new == 'true'
@@ -71,7 +86,7 @@ jobs:
             --generate-notes
 
       - name: Compute tarball SHA256
-        if: steps.meta.outputs.new == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.meta.outputs.write_tap == 'true'
         id: sha
         run: |
           curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${{ steps.meta.outputs.tag }}.tar.gz" -o tarball.tgz
@@ -79,7 +94,7 @@ jobs:
           echo "sha256=$sha" >>"$GITHUB_OUTPUT"
 
       - name: Checkout homebrew-tap
-        if: steps.meta.outputs.new == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.meta.outputs.write_tap == 'true'
         uses: actions/checkout@v7
         with:
           repository: dbaggott/homebrew-tap
@@ -87,7 +102,7 @@ jobs:
           path: tap
 
       - name: Update formula
-        if: steps.meta.outputs.new == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.meta.outputs.write_tap == 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
           TAG:     ${{ steps.meta.outputs.tag }}
@@ -134,7 +149,7 @@ jobs:
           RUBY
 
       - name: Commit and push formula
-        if: steps.meta.outputs.new == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.meta.outputs.write_tap == 'true'
         working-directory: tap
         run: |
           git config user.name  "github-actions[bot]"

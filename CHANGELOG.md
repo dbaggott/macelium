@@ -10,8 +10,9 @@ contract than its own.
   `settings`, `apps` and `init_notes` declarations, the settings list's
   declarations including `touch_id_sudo`, the apps' `after-apply`, `watches`
   and `manual-steps` files, the commands `bootstrap [<checkout>]`,
-  `plan [--notify]`, `apply` and `settings [--file <path>]` and their exit
-  statuses, and the files macelium keeps on the machine.
+  `plan [--notify]`, `apply`, `settings [--file <path>]` and
+  `--version` and their exit statuses, and the files macelium keeps on the
+  machine.
 
 ## Unreleased
 

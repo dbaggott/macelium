@@ -10,7 +10,7 @@ test_version_prints_the_version_line() {
   [[ $(cat "$out") == "macelium $version" ]] || fail "--version printed: $(cat "$out")"
   run -V
   assert_status 0
-  assert_contains "$out" "macelium $version"
+  [[ $(cat "$out") == "macelium $version" ]] || fail "-V printed: $(cat "$out")"
 }
 
 test_version_takes_no_argument() {
