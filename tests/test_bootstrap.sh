@@ -165,6 +165,19 @@ test_logged_step_starts_each_output_line_on_a_clear_line() {
   assert_not_contains "$out" unfiltered
 }
 
+test_logged_step_cuts_its_status_to_the_terminal_width() {
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty_raw 3 /bin/bash -c 'stty cols 30; source "$1"; tick=1 bootstrap_log=$HOME/bootstrap.log; run_logged_step "a step with a long name" sleep 1.5' \
+    _ "$tool"
+  assert_status 0
+  local raw shown
+  raw=$(cat "$out")
+  [[ $raw == *"... a step with a long"* ]] || fail "no status line was drawn"
+  shown=${raw#*$'\r\033[K'}
+  shown=${shown%%$'\r'*}
+  ((${#shown} == 30)) || fail "status is ${#shown} columns wide: $shown"
+}
+
 test_logged_step_off_a_terminal_prints_plain_lines() {
   source_macelium
   run_logged_step "brew bundle" brew bundle >"$sandbox/out" 2>&1

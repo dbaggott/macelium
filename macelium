@@ -1745,7 +1745,9 @@ step_status() {
   local files listing=''
   if [[ -n $3 ]]; then
     files=("$3"/downloads/*.incomplete)
-    [[ -e ${files[0]} ]] && listing=$(stat -f $'%z\t%N' "${files[@]}")
+    # A download that finishes between the glob and stat is gone: stat
+    # still prints the rest.
+    [[ -e ${files[0]} ]] && listing=$(stat -f $'%z\t%N' "${files[@]}" 2>/dev/null)
   fi
   touch "$4"
   step=$1 awk -F '\t' -v seconds="$2" -v n="$5" -v tick="$tick" -v sizes="$4.next" '
@@ -1812,7 +1814,7 @@ step_status() {
 # line: each write starts on a new one, and no status is drawn.
 show_step() {
   local name=$1 on_tty=$2 cache=$3 sizes=$4
-  local line status_line n=0 start=$SECONDS minutes=0 drawn=no waiting='' previous='' hinted=''
+  local line status_line columns=80 n=0 start=$SECONDS minutes=0 drawn=no waiting='' previous='' hinted=''
   step_tick
   while IFS= read -r line; do
     case $line in
@@ -1836,10 +1838,20 @@ process_tree() {
   ps -A -o pid=,ppid=,comm=
 }
 
+# Prints the terminal's width, or 80 when it has none. tput is no use in a
+# command substitution: it reads the width from stderr.
+terminal_columns() {
+  local size
+  size=$(stty size </dev/tty 2>/dev/null)
+  size=${size#* }
+  [[ $size =~ ^[0-9]+$ ]] && ((size > 0)) || size=80
+  echo "$size"
+}
+
 # show_step's draw, on its locals: prints the status at the cursor, cut to the
 # terminal's width, since \033[K clears only the cursor's row.
 step_draw() {
-  printf '%.*s' "$(tput cols 2>/dev/null || echo 80)" "$status_line"
+  printf '%.*s' "$columns" "$status_line"
   drawn=yes
 }
 
@@ -1857,6 +1869,7 @@ step_tick() {
       hinted=$waiting
     fi
   elif [[ $on_tty == yes ]]; then
+    columns=$(terminal_columns)
     printf '\r\033[K'
     step_draw
   elif ((seconds / 60 > minutes)); then
@@ -1871,7 +1884,7 @@ step_tick() {
 # may have written its prompt on the cursor's line.
 step_clear() {
   [[ $on_tty == yes ]] || return 0
-  if [[ $drawn == yes ]]; then
+  if [[ $drawn == yes || -n $waiting ]]; then
     waiting=$(prompting_sudo "$(process_tree)" "$$")
   fi
   if [[ -n $waiting ]]; then
@@ -1910,7 +1923,9 @@ run_logged_step() {
     wait "$ticker" 2>/dev/null
     printf '%s\n' "$done_marker"
   } | show_step "$name" "$on_tty" "$cache" "$out.sizes"
-  status=$(<"$out.status")
+  # A pipeline that ended without writing its status didn't finish.
+  status=$(cat "$out.status" 2>/dev/null)
+  status=${status:-1}
   if ((status == 0)); then
     record_step "$name" ok
   else
