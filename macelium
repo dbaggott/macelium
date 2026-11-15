@@ -1582,6 +1582,13 @@ rerun=''
 # Set by record_step: each step and how it ended, tab-separated, a line each.
 step_results=''
 
+# Seconds between updates of a logged step's status.
+tick=5
+# The lines a logged step's ticker, and the end of its command, send its
+# display loop (show_step), which no command prints.
+tick_marker=$'\x01macelium tick' done_marker=$'\x01macelium done'
+waiting_hint='  ... waiting for input above (likely a password): type it and press Return'
+
 # Prints the name of the app running this shell, from the bundle identifier
 # macOS puts in its environment.
 terminal_app() {
@@ -1696,28 +1703,214 @@ record_step() {
   step_results+="$1"$'\t'"$2"$'\n'
 }
 
+# Takes `ps -A -o pid=,ppid=,comm=` output and a pid. Prints the pid of a
+# sudo below that pid with no child process, and fails when there is none.
+# That is a sudo waiting for a password: one running a command waits for it
+# as its child.
+prompting_sudo() {
+  awk -v root="$2" '
+    {
+      parent[$1] = $2
+      children[$2]++
+      comm = $0
+      sub(/^ *[0-9]+ +[0-9]+ +/, "", comm)
+      sub(/.*\//, "", comm)
+      if (comm == "sudo") sudo[$1] = 1
+    }
+    END {
+      for (pid in sudo) {
+        if (children[pid]) continue
+        # The depth bounds a cycle that reused pids could make in the snapshot.
+        for (p = parent[pid]; p != "" && depth < 100; p = parent[p]) {
+          depth++
+          if (p == root) {
+            print pid
+            exit 0
+          }
+        }
+        depth = 0
+      }
+      exit 1
+    }' <<<"$1"
+}
+
+# Takes a logged step's name, its seconds so far, Homebrew's cache directory
+# or none, a file keeping each download's size and the tick it last grew at,
+# and this tick's number, the first being 0. Updates the file, and prints the
+# step's status: its name and time so far, then the download that grew most
+# of those that grew in the last three ticks, or else the one that grew last,
+# as stalled. A download that has not grown since the step began, such as one
+# an interrupted run left for resuming, is not shown.
+step_status() {
+  local files listing=''
+  if [[ -n $3 ]]; then
+    files=("$3"/downloads/*.incomplete)
+    [[ -e ${files[0]} ]] && listing=$(stat -f $'%z\t%N' "${files[@]}")
+  fi
+  touch "$4"
+  step=$1 awk -F '\t' -v seconds="$2" -v n="$5" -v tick="$tick" -v sizes="$4.next" '
+    function size(bytes) {
+      if (bytes < 1024) return int(bytes) " B"
+      if (bytes < 1048576) return int(bytes / 1024) " KB"
+      if (bytes < 1073741824) return int(bytes / 1048576) " MB"
+      return sprintf("%.1f GB", bytes / 1073741824)
+    }
+    function duration(s) { return s < 60 ? s " s" : int(s / 60) " min" }
+    # Homebrew names a download in progress <sha256>--<name>.incomplete.
+    function download(path) {
+      sub(/.*\//, "", path)
+      sub(/^[0-9a-f]+--/, "", path)
+      sub(/\.incomplete$/, "", path)
+      return path
+    }
+    BEGIN { printf "" >sizes }
+    FILENAME == ARGV[1] { was[$1] = $2; grew[$1] = $3; next }
+    NF == 2 {
+      path = $2
+      if (path in was) {
+        growth = $1 - was[path]
+        last = growth > 0 ? n : grew[path]
+      } else if (n > 0) {
+        growth = $1
+        last = n
+      } else {
+        growth = 0
+        last = -1
+      }
+      print path "\t" $1 "\t" last >sizes
+      if (last < 0) next
+      if (n - last < 3) {
+        growing++
+        if (shown == "" || growth > shown_growth) {
+          shown = path; shown_growth = growth; shown_size = $1
+        }
+      } else if (stalled == "" || last > stalled_last) {
+        stalled = path; stalled_last = last; stalled_size = $1
+      }
+    }
+    END {
+      printf "  ... %s, %s", ENVIRON["step"], duration(seconds)
+      if (shown != "") {
+        printf ": downloading %s, %s, %s/s", download(shown), size(shown_size), size(shown_growth / tick)
+        if (growing > 1) printf " (+%d more)", growing - 1
+      } else if (stalled != "") {
+        printf ": %s stalled at %s, no growth for %s", download(stalled), size(stalled_size), duration((n - stalled_last) * tick)
+      }
+      printf "\n"
+    }' "$4" - <<<"$listing"
+  mv "$4.next" "$4"
+}
+
+# Takes a logged step's name, whether its output goes to a terminal,
+# Homebrew's cache directory or none, and a file to keep the downloads' sizes
+# in. Reads the step's filtered output and the ticker's markers, and is the
+# only writer to the screen until the done marker. On a terminal the status
+# is one line redrawn in place; elsewhere it is a line each minute.
+#
+# sudo writes its prompt with no newline, at the end of the status line, so
+# while a sudo below the bootstrap asks (prompting_sudo), nothing clears a
+# line: each write starts on a new one, and no status is drawn.
+show_step() {
+  local name=$1 on_tty=$2 cache=$3 sizes=$4
+  local line status_line n=0 start=$SECONDS minutes=0 drawn=no waiting='' previous='' hinted=''
+  step_tick
+  while IFS= read -r line; do
+    case $line in
+      "$tick_marker")
+        ((n++))
+        step_tick
+        ;;
+      "$done_marker") break ;;
+      *)
+        step_clear
+        printf '%s\n' "$line"
+        [[ $on_tty == yes && -z $waiting ]] && step_draw
+        ;;
+    esac
+  done
+  step_clear
+}
+
+# Prints the bootstrap's processes, for prompting_sudo.
+process_tree() {
+  ps -A -o pid=,ppid=,comm=
+}
+
+# show_step's draw, on its locals: prints the status at the cursor, cut to the
+# terminal's width, since \033[K clears only the cursor's row.
+step_draw() {
+  printf '%.*s' "$(tput cols 2>/dev/null || echo 80)" "$status_line"
+  drawn=yes
+}
+
+# show_step's tick, on its locals: updates the status and draws it, unless a
+# sudo is asking, which it points at once the same sudo has asked for a tick.
+step_tick() {
+  local seconds=$((SECONDS - start))
+  status_line=$(step_status "$name" "$seconds" "$cache" "$sizes" "$n")
+  waiting=$(prompting_sudo "$(process_tree)" "$$")
+  if [[ -n $waiting ]]; then
+    drawn=no
+    if [[ $waiting == "$previous" && $waiting != "$hinted" ]]; then
+      [[ $on_tty == yes ]] && printf '\n'
+      echo "$waiting_hint"
+      hinted=$waiting
+    fi
+  elif [[ $on_tty == yes ]]; then
+    printf '\r\033[K'
+    step_draw
+  elif ((seconds / 60 > minutes)); then
+    minutes=$((seconds / 60))
+    echo "$status_line"
+  fi
+  previous=$waiting
+}
+
+# show_step's clear, on its locals: on a terminal, leaves the cursor at the
+# start of a line holding no status, clearing the status line unless a sudo
+# may have written its prompt on the cursor's line.
+step_clear() {
+  [[ $on_tty == yes ]] || return 0
+  if [[ $drawn == yes ]]; then
+    waiting=$(prompting_sudo "$(process_tree)" "$$")
+  fi
+  if [[ -n $waiting ]]; then
+    printf '\n'
+  elif [[ $drawn == yes ]]; then
+    printf '\r\033[K'
+  fi
+  drawn=no
+}
+
 # Takes a step's name and its command. Runs the command with its output in
-# the log, showing only Homebrew's progress lines and, each minute, that it
-# is still running, and records the step.
+# the log, showing only Homebrew's progress lines and the step's status
+# (show_step), and records the step.
 run_logged_step() {
-  local name=$1 out status ticker
+  local name=$1 out status on_tty=no cache=''
   shift
   printf '\n==> %s (output in %s)\n' "$name" "$bootstrap_log"
   printf '\n==> %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*" >>"$bootstrap_log"
   out=$(mktemp)
-  (
-    minutes=0
-    while sleep 60; do
-      ((minutes++))
-      echo "  ... $name still running, $minutes min so far"
-    done
-  ) &
-  ticker=$!
-  "$@" 2>&1 | tee -a "$bootstrap_log" "$out" |
-    grep --line-buffered -E '^(Tapping|Installing|Upgrading) |has failed!$'
-  status=${PIPESTATUS[0]}
-  kill "$ticker" 2>/dev/null
-  wait "$ticker" 2>/dev/null
+  [[ -t 1 ]] && on_tty=yes
+  if [[ $1 == brew ]]; then
+    cache=$(brew --cache 2>/dev/null)
+  fi
+  {
+    local ticker
+    while sleep "$tick"; do
+      printf '%s\n' "$tick_marker"
+    done &
+    ticker=$!
+    "$@" 2>&1 | tee -a "$bootstrap_log" "$out" |
+      grep --line-buffered -E '^(Tapping|Installing|Upgrading) |has failed!$'
+    echo "${PIPESTATUS[0]}" >"$out.status"
+    # The killed ticker's sleep holds the pipe open until it ends, so
+    # show_step stops at the done marker, not at the end of its input.
+    kill "$ticker" 2>/dev/null
+    wait "$ticker" 2>/dev/null
+    printf '%s\n' "$done_marker"
+  } | show_step "$name" "$on_tty" "$cache" "$out.sizes"
+  status=$(<"$out.status")
   if ((status == 0)); then
     record_step "$name" ok
   else
@@ -1726,7 +1919,7 @@ run_logged_step() {
     # brew's errors start "Error:"; without any, the end of the output says why.
     grep '^Error: ' "$out" || tail -n 5 "$out"
   fi
-  rm -f "$out"
+  rm -f "$out" "$out.status" "$out.sizes"
   return "$status"
 }
 
