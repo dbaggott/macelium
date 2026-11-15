@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016 # the $prefix and $log in the tests are jq's
 # Installs the macelium formula, runs its test, starts its service, and checks
-# the launchd plist Homebrew writes for it: the 09:00 schedule,
-# `plan --notify`, Homebrew's bin on PATH and the drift log. release.yml's
+# the launchd plist Homebrew writes for it: the 09:00 schedule and no run on
+# load, `plan --notify`, Homebrew's bin on PATH and the drift log. release.yml's
 # verify job runs it on a macOS runner after writing the tap. It starts a
 # service, so it is for a runner, not for a Mac in use.
 #
@@ -47,6 +47,7 @@ expect() {
 
 expect '.ProgramArguments == [$prefix + "/opt/macelium/bin/macelium", "plan", "--notify"]'
 expect '.StartCalendarInterval == {"Hour": 9, "Minute": 0}'
+expect '.RunAtLoad == false'
 expect '.EnvironmentVariables.PATH | split(":") | index($prefix + "/bin") != null'
 expect '.StandardOutPath == $log'
 expect '.StandardErrorPath == $log'

@@ -97,7 +97,8 @@ jobs:
           # No explicit `version` line: brew infers it from the tag in the
           # url, and `brew audit` flags a derivable version as redundant.
           # The service is the drift check: StartCalendarInterval of 09:00,
-          # run on wake when the Mac slept through it. std_service_path_env
+          # run on wake when the Mac slept through it, and not on load, which
+          # Homebrew's service otherwise defaults to. std_service_path_env
           # puts Homebrew's bin on PATH without naming a prefix.
           cat >tap/Formula/macelium.rb <<RUBY
           class Macelium < Formula
@@ -120,6 +121,7 @@ jobs:
               run [opt_bin/"macelium", "plan", "--notify"]
               run_type :cron
               cron "0 9 * * *"
+              run_at_load false
               environment_variables PATH: std_service_path_env
               log_path "#{Dir.home}/Library/Logs/macelium-drift.log"
               error_log_path "#{Dir.home}/Library/Logs/macelium-drift.log"
