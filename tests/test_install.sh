@@ -11,9 +11,9 @@ run_installer() {
   status=$?
 }
 
-# A state repo that https://github.com/example/state clones, and a macelium
-# that records its call and whether stdin is a terminal, and exits
-# $STUB_MACELIUM_STATUS.
+# A state repo that https://github.com/example/state clones; a brew whose
+# `list` fails until `install` has run; and a macelium that records its call
+# and whether stdin is a terminal, and exits $STUB_MACELIUM_STATUS.
 installable_state() {
   make_state macelium.conf $'contract 1\n'
   git config --global url."file://$sandbox/state.git".insteadOf https://github.com/example/state
@@ -24,7 +24,15 @@ tty=no
 echo "macelium $* tty=$tty" >>"$STUB_LOG"
 exit "${STUB_MACELIUM_STATUS:-0}"
 STUB
-  chmod +x "$sandbox/bin/macelium"
+  cat >"$sandbox/bin/brew" <<'STUB'
+#!/bin/bash
+echo "brew $*" >>"$STUB_LOG"
+case $1 in
+  install) touch "$STUB_LOG.installed" ;;
+  list) [[ -e $STUB_LOG.installed ]] ;;
+esac
+STUB
+  chmod +x "$sandbox/bin/macelium" "$sandbox/bin/brew"
 }
 
 test_install_refuses_without_owner_and_repo() {
@@ -56,7 +64,6 @@ test_install_refuses_a_clone_of_another_repo() {
 
 test_install_installs_clones_and_bootstraps_then_resumes() {
   installable_state
-  export STUB_BREW_NOT_INSTALLED=yes
   run_tty -- bash "$installer" example/state
   assert_status 0
   assert_contains "$STUB_LOG" "brew install dbaggott/tap/macelium"
@@ -64,7 +71,6 @@ test_install_installs_clones_and_bootstraps_then_resumes() {
   [[ -f $HOME/git/state/macelium.conf ]] || fail "not cloned to ~/git/state"
   assert_contains "$STUB_LOG" "macelium bootstrap $HOME/git/state tty=yes"
 
-  unset STUB_BREW_NOT_INSTALLED
   : >"$STUB_LOG"
   run_tty -- bash "$installer" example/state
   assert_status 0

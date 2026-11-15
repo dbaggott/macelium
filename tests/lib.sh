@@ -14,7 +14,7 @@ setup_sandbox() {
   mkdir -p "$HOME" "$sandbox/bin"
   cp "$(dirname "$tool")"/tests/stubs/* "$sandbox/bin/"
   export PATH=$sandbox/bin:$PATH
-  unset XDG_CONFIG_HOME STUB_SOURCE_PATH STUB_CHEZMOI_STATUS STUB_BREW_UNLISTED STUB_BREW_NOT_INSTALLED
+  unset XDG_CONFIG_HOME STUB_SOURCE_PATH STUB_CHEZMOI_STATUS STUB_BREW_UNLISTED
   : >"$STUB_LOG"
 }
 
