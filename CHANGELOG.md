@@ -14,7 +14,7 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
-## Unreleased
+## 0.2.1
 
 - The state repo's Brewfile line for macelium is now
   `brew "dbaggott/tap/macelium", trusted: true, restart_service: :always`
