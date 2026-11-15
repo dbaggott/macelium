@@ -81,6 +81,8 @@ brew "dbaggott/tap/macelium", trusted: true, restart_service: :always
   naming its tap, `brew bundle` tries to start the service on every run, and
   starting it again once it is loaded fails, so every `brew bundle` after the
   first would fail. A restart unloads the service before loading it again.
+  `restart_service: :changed`, which `brew bundle dump` writes, fails the
+  same way when nothing changed.
 
 Without the line, `plan` reports macelium as installed but not listed, and no
 drift check runs.
