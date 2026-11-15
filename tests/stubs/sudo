@@ -1,0 +1,7 @@
+#!/bin/bash
+# Records the call. Asks for nothing, and runs a command as this user.
+echo "sudo $*" >>"$STUB_LOG"
+case ${1:-} in
+  -v | -n) exit 0 ;;
+esac
+"$@"

@@ -1,0 +1,3 @@
+{{- /* macelium finds the state repo through chezmoi source-path, so the
+       config names this checkout as chezmoi's source. */ -}}
+sourceDir = {{ .chezmoi.workingTree | quote }}

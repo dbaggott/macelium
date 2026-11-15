@@ -1,0 +1,3 @@
+#!/bin/bash
+# Reports one enrolled finger.
+echo "User: 1 biometric template"

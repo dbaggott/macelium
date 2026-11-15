@@ -1,0 +1,4 @@
+#!/bin/bash
+# Records the call, and finds no runtime missing.
+echo "mise $*" >>"$STUB_LOG"
+exit 0

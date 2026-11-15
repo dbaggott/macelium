@@ -1,0 +1,21 @@
+#!/bin/bash
+# Records the call, reading any Brewfile on stdin. `bundle cleanup` lists $STUB_BREW_UNLISTED, a formula a
+# line, as installed but not listed; every other check finds nothing.
+echo "brew $*" >>"$STUB_LOG"
+for arg in "$@"; do
+  if [[ $arg == --file=- ]]; then cat >/dev/null; fi
+done
+case ${1:-} in
+  bundle)
+    case ${2:-} in
+      cleanup)
+        if [[ -n ${STUB_BREW_UNLISTED:-} ]]; then
+          echo "Would uninstall formulae:"
+          printf '%s\n' "$STUB_BREW_UNLISTED"
+          exit 1
+        fi
+        ;;
+    esac
+    ;;
+esac
+exit 0

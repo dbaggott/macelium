@@ -1,0 +1,14 @@
+#!/bin/bash
+# Records the call. Every domain exports empty, so every declared setting
+# differs.
+echo "defaults $*" >>"$STUB_LOG"
+for arg in "$@"; do
+  if [[ $arg == export ]]; then
+    cat <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict/></plist>
+PLIST
+  fi
+done
+exit 0
