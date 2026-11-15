@@ -8,6 +8,7 @@
 #   macelium plan [--notify]
 #   macelium apply
 #   macelium settings [--file <path>]
+#   macelium --version
 #
 # plan changes nothing on the machine but a git fetch in the checkout and,
 # without --notify, a brew update, and never prompts. It prints every
@@ -46,6 +47,9 @@
 # macOS setting the list declares has another value; an apps hook, or a file
 # it watches, changed since the hooks last ran.
 set -uo pipefail
+
+# A merge to main that changes this line is a release (README.md, "Releasing").
+VERSION="0.1.0"
 
 # brew bundle runs brew update first unless this is set, which in apply would
 # upgrade past what the plan showed; update_homebrew runs it instead.
@@ -1866,7 +1870,7 @@ bootstrap() {
 }
 
 usage() {
-  echo "usage: macelium bootstrap [<checkout>] | macelium plan [--notify] | macelium apply | macelium settings [--file <path>]" >&2
+  echo "usage: macelium bootstrap [<checkout>] | macelium plan [--notify] | macelium apply | macelium settings [--file <path>] | macelium --version" >&2
   exit 1
 }
 
@@ -1891,6 +1895,11 @@ case "${1:-}" in
   settings)
     shift
     settings_command "$@"
+    ;;
+  -V | --version)
+    shift
+    (($# == 0)) || usage
+    echo "macelium $VERSION"
     ;;
   *) usage ;;
 esac

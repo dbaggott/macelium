@@ -1,0 +1,176 @@
+name: release
+
+# A merge to main that bumps VERSION= in the macelium script IS a release:
+# this workflow tags the commit v<VERSION>, publishes a GitHub Release with
+# generated notes, and updates the Homebrew tap formula. Pushes that don't
+# change VERSION (or re-runs after a release) find the tag already present
+# and skip the tag/release step. Tagging, releasing, and the tap update
+# live in one workflow because tags created with the workflow's
+# GITHUB_TOKEN do not trigger other workflows. The verify job then installs
+# what the tap now holds and checks the service's plist
+# (.github/verify-formula.sh).
+#
+# workflow_dispatch (main only) re-runs the sha + tap steps against the
+# existing release, recovering a release-created-but-tap-push-failed run;
+# it is idempotent when the tap is already current.
+
+on:
+  push:
+    branches: [main]
+    paths: ['macelium']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Serialize runs: two quick merges must not both see "no tag" and race to
+# create the same release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Dispatch can target any branch; only ever release from main.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      # Whether the tap was written, which is what verify checks.
+      tap-written: ${{ steps.meta.outputs.write_tap }}
+    steps:
+      - name: Checkout macelium
+        uses: actions/checkout@v7
+
+      - name: Read script version and check for existing tag
+        id: meta
+        run: |
+          version="$(grep -E '^VERSION=' macelium | head -1 | cut -d'"' -f2)"
+          if [[ -z "$version" ]]; then
+            echo "::error::could not read VERSION from macelium script"
+            exit 1
+          fi
+          tag="v$version"
+          # --exit-code exits 2 when no ref matches; anything else but 0 is
+          # a failed read, not an absent tag.
+          found=0
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || found=$?
+          case $found in
+            0)
+              echo "Tag $tag already exists; nothing to release."
+              new=false
+              ;;
+            2) new=true ;;
+            *)
+              echo "::error::git ls-remote exited $found reading tag $tag"
+              exit 1
+              ;;
+          esac
+          write_tap=$new
+          [[ $GITHUB_EVENT_NAME != workflow_dispatch ]] || write_tap=true
+          {
+            echo "new=$new"
+            echo "write_tap=$write_tap"
+            echo "tag=$tag"
+            echo "version=$version"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Create tag and GitHub release
+        if: steps.meta.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.meta.outputs.tag }}" \
+            --generate-notes
+
+      - name: Compute tarball SHA256
+        if: steps.meta.outputs.write_tap == 'true'
+        id: sha
+        run: |
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${{ steps.meta.outputs.tag }}.tar.gz" -o tarball.tgz
+          sha="$(sha256sum tarball.tgz | awk '{print $1}')"
+          echo "sha256=$sha" >>"$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew-tap
+        if: steps.meta.outputs.write_tap == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: dbaggott/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: tap
+
+      - name: Update formula
+        if: steps.meta.outputs.write_tap == 'true'
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG:     ${{ steps.meta.outputs.tag }}
+          SHA256:  ${{ steps.sha.outputs.sha256 }}
+        run: |
+          mkdir -p tap/Formula
+          # No explicit `version` line: brew infers it from the tag in the
+          # url, and `brew audit` flags a derivable version as redundant.
+          # The service is the drift check: StartCalendarInterval of 09:00,
+          # run on wake when the Mac slept through it, and not on load, which
+          # Homebrew's service otherwise defaults to. std_service_path_env
+          # puts Homebrew's bin on PATH without naming a prefix.
+          cat >tap/Formula/macelium.rb <<RUBY
+          class Macelium < Formula
+            desc "Set up a Mac from a state repo and keep it there"
+            homepage "https://github.com/dbaggott/macelium"
+            url "https://github.com/dbaggott/macelium/archive/refs/tags/$TAG.tar.gz"
+            sha256 "$SHA256"
+            license "MIT"
+
+            depends_on "chezmoi"
+            depends_on "gh"
+            depends_on "jq"
+            depends_on "mise"
+
+            def install
+              bin.install "macelium"
+            end
+
+            service do
+              run [opt_bin/"macelium", "plan", "--notify"]
+              run_type :cron
+              cron "0 9 * * *"
+              run_at_load false
+              environment_variables PATH: std_service_path_env
+              log_path "#{Dir.home}/Library/Logs/macelium-drift.log"
+              error_log_path "#{Dir.home}/Library/Logs/macelium-drift.log"
+            end
+
+            test do
+              assert_match "macelium $VERSION", shell_output("#{bin}/macelium --version")
+            end
+          end
+          RUBY
+
+      - name: Commit and push formula
+        if: steps.meta.outputs.write_tap == 'true'
+        working-directory: tap
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/macelium.rb
+          if git diff --staged --quiet; then
+            echo "No formula changes; skipping commit."
+            exit 0
+          fi
+          git commit -m "macelium ${{ steps.meta.outputs.tag }}"
+          git push
+
+  verify:
+    needs: release
+    if: needs.release.outputs.tap-written == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout macelium
+        uses: actions/checkout@v7
+
+      - name: Install the formula from the tap, test it and check its service
+        run: .github/verify-formula.sh dbaggott/tap/macelium

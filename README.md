@@ -9,8 +9,8 @@ shape of terraform's plan and apply:
 - `macelium plan` prints every difference, and changes nothing.
 - `macelium apply` prints the plan, asks, and then brings the machine in line.
 - `macelium bootstrap` sets up a new machine from a checkout.
-- A daily `macelium plan --notify` posts a notification when the machine has
-  drifted.
+- A daily `macelium plan --notify`, the Homebrew formula's service, posts a
+  notification when the machine has drifted.
 
 It needs macOS, Homebrew, chezmoi, mise and jq.
 
@@ -129,6 +129,7 @@ macelium bootstrap [<checkout>]
 macelium plan [--notify]
 macelium apply
 macelium settings [--file <path>]
+macelium --version
 ```
 
 **`plan`** changes nothing on the machine but a `git fetch` in the checkout
@@ -177,6 +178,8 @@ result, and the manual steps. It needs a terminal.
 repo's unless `--file` names another, without asking, and restarts the apps
 that read them.
 
+**`--version`** (or `-V`) prints `macelium <version>`.
+
 ### Exit status
 
 | Status | `plan` | the others |
@@ -193,6 +196,8 @@ that read them.
 - `~/.local/state/macelium/apps-hooks.sha256`: the hash the apps hooks last
   all succeeded at.
 - `~/Library/Logs/macelium-bootstrap.log`: each bootstrap step's output.
+- `~/Library/Logs/macelium-drift.log`: the daily `plan --notify`'s line, and
+  anything it prints to stderr, from the formula's service.
 
 ## Contract
 
@@ -207,3 +212,15 @@ These may change without a bump:
 - the `--notify` log line, and the notification's text
 - the wording and layout of the plan, the prompts, and the other messages
 - the bootstrap log's content.
+
+## Releasing
+
+A merge to `main` that changes `VERSION=` in `macelium` is a release:
+`.github/workflows/release.yml` tags the commit `v<VERSION>`, publishes a
+GitHub release, writes `Formula/macelium.rb` in
+[`dbaggott/homebrew-tap`](https://github.com/dbaggott/homebrew-tap), and then
+installs the formula on a macOS runner and checks its service. A merge that
+leaves `VERSION=` as it was publishes nothing.
+
+To release, bump `VERSION=` and move the `CHANGELOG.md` entries under
+"Unreleased" to a heading for the new version, in the same pull request.
