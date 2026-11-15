@@ -68,3 +68,15 @@ test_default_parts_are_read() {
   assert_contains "$out" "formula extra"
   assert_contains "$STUB_LOG" "brew bundle cleanup"
 }
+
+test_notify_on_a_refused_manifest_logs_and_notifies_and_checks_nothing() {
+  make_state macelium.conf $'contract 2\n'
+  run plan --notify
+  assert_status 1
+  assert_contains "$out" "manifest=error notified=yes manifest_error="
+  assert_contains "$out" "upgrade\\ macelium"
+  assert_contains "$STUB_LOG" "The state repo's macelium.conf was refused."
+  if grep -v -e '^chezmoi source-path$' -e '^osascript ' "$STUB_LOG" | grep -q .; then
+    fail "ran a check: $(cat "$STUB_LOG")"
+  fi
+}

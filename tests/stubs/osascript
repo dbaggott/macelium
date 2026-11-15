@@ -1,0 +1,3 @@
+#!/bin/bash
+# Records the call, with the notification's title and text, and posts nothing.
+echo "osascript $*" >>"$STUB_LOG"

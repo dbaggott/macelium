@@ -1357,6 +1357,17 @@ print_log_line() {
   printf '%s\n' "$line"
 }
 
+# Takes why the manifest was refused. Posts the notification that it was, and
+# prints plan --notify's log line for a run that checked nothing.
+print_refusal_log_line() {
+  local notified=yes notify_detail line
+  notify_detail=$(notify "Macelium drift" "The state repo's macelium.conf was refused. Run \`macelium plan\`.") || notified=failed
+  line="$(date +%Y-%m-%dT%H:%M:%S%z) manifest=error notified=$notified"
+  line+=" manifest_error=$(printf '%q' "$(detail_line "$1")")"
+  [[ -n $notify_detail ]] && line+=" notify_error=$(printf '%q' "$notify_detail")"
+  printf '%s\n' "$line"
+}
+
 plan() {
   local mode=full attempts=1 status
   (($# <= 1)) || usage
@@ -1366,9 +1377,12 @@ plan() {
     *) usage ;;
   esac
   find_checkout
-  # The agent's run goes on, so the failure reaches its log and notification.
-  if [[ $manifest_failed == yes && $mode == full ]]; then
-    printf 'macelium plan: %s\n' "$repo_detail" >&2
+  if [[ $manifest_failed == yes ]]; then
+    if [[ $mode == notify ]]; then
+      print_refusal_log_line "$repo_detail"
+    else
+      printf 'macelium plan: %s\n' "$repo_detail" >&2
+    fi
     return 1
   fi
   fetch_and_check_behind "$attempts"

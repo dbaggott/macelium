@@ -72,9 +72,11 @@ Each path is relative to the state repo's root.
 | `init_notes <path>` | none | printed by `bootstrap` before `chezmoi init` first asks its questions |
 
 macelium reads the `contract` line before any other. A contract newer than
-its own makes every command exit 1, before it changes anything, with a
-message to upgrade macelium. Under a contract it knows, a line that is not
-one of these declarations, a comment or a blank refuses the manifest unrun.
+its own makes every command exit 1, before any check runs, with a message to
+upgrade macelium. Under a contract it knows, a line that is not
+one of these declarations, a comment or a blank refuses the manifest unrun,
+the same way. `plan --notify` writes a refusal to its log line, and posts a
+notification that the manifest was refused.
 
 ```
 contract 1
