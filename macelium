@@ -711,6 +711,13 @@ sandbox_note() {
   esac
 }
 
+# The EXIT trap export_domain sets, which an exec skips, so upgrade_self runs
+# it first.
+remove_export_dir() {
+  if [[ -n $export_dir ]]; then rm -rf "$export_dir"; fi
+  export_dir=''
+}
+
 # Takes current or nothing, and a domain. Sets export_file to the domain
 # exported as a plist, once per pass of check_macos. Returns non-zero, with macos_detail set,
 # when defaults cannot export it.
@@ -721,7 +728,7 @@ export_domain() {
       macos_detail="mktemp -d failed"
       return 1
     }
-    trap 'rm -rf "$export_dir"' EXIT
+    trap remove_export_dir EXIT
   fi
   export_file="$export_dir/$export_pass-${host:+$host-}$domain.plist"
   [[ -f $export_file ]] && return 0
@@ -1451,6 +1458,8 @@ upgrade_self() {
     stop_apply "macelium was upgraded, but not found under brew --prefix to run"
     return 1
   fi
+  remove_export_dir
+  trap - EXIT
   export MACELIUM_UPGRADED_FROM=$VERSION
   exec "$prefix/bin/macelium" apply
 }

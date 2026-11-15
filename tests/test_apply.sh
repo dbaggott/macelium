@@ -67,10 +67,17 @@ make_outdated_self() {
 test_apply_upgrades_itself_first_then_execs_the_new_version() {
   local version
   version=$(grep -E '^VERSION=' "$tool" | head -n 1 | cut -d '"' -f 2)
-  make_outdated_self apps/one/after-apply $'echo "hook one ran" >>"$STUB_LOG"\n'
+  make_outdated_self apps/one/after-apply $'echo "hook one ran" >>"$STUB_LOG"\n' \
+    macos.sh $'setting com.example.macelium-test greeting string hello\n'
   export STUB_CHEZMOI_STATUS=' M .zshrc'$'\n'
   run_tty y -- "$tool" apply
   assert_status 0
+  # The settings check exports domains to a temporary directory, which the
+  # exec must not leave behind.
+  local made
+  made=$(sed -n 's/^mktemp made //p' "$STUB_LOG")
+  [[ -n $made ]] || fail "the settings check made no temporary directory"
+  [[ ! -e $made ]] || fail "left behind: $made"
   assert_contains "$out" "1 to upgrade"
   assert_order "$STUB_LOG" \
     "brew upgrade macelium" \
