@@ -16,6 +16,13 @@ contract than its own.
 
 ## Unreleased
 
+## 0.2.0
+
+- `apply` upgrades macelium itself first when the plan lists it, then hands
+  over to the upgraded version, which prints its own plan and asks again
+  (README.md, "Commands"). A failed upgrade stops `apply` with nothing else
+  changed.
+
 ## 0.1.0
 
 - macelium, published from the `dotfiles` command it was: the state repo it
