@@ -71,13 +71,16 @@ sourceDir = {{ .chezmoi.workingTree | quote }}
 The state repo's Brewfile lists macelium itself:
 
 ```ruby
-brew "dbaggott/tap/macelium", trusted: true, start_service: true
+brew "dbaggott/tap/macelium", trusted: true, restart_service: :always
 ```
 
 - `trusted: true`, because Homebrew won't load a formula from a third-party
   tap through a Brewfile line without it.
-- `start_service: true`, because the daily drift check is the formula's
-  service, and this starts it.
+- `restart_service: :always`, because the daily drift check is the formula's
+  service, and this starts it. It isn't `start_service: true`: for a line
+  naming its tap, `brew bundle` tries to start the service on every run, and
+  starting it again once it is loaded fails, so every `brew bundle` after the
+  first would fail. A restart unloads the service before loading it again.
 
 Without the line, `plan` reports macelium as installed but not listed, and no
 drift check runs.
