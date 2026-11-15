@@ -14,6 +14,30 @@ shape of terraform's plan and apply:
 
 It needs macOS, Homebrew, chezmoi, mise and jq.
 
+## Install
+
+On a new Mac, paste this into Terminal, with your state repo's GitHub
+`<owner>/<repo>`, and follow what it asks:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dbaggott/macelium/main/install.sh | bash -s <owner>/<repo> [<path>]
+```
+
+`<path>` is where the state repo is cloned, `~/git/<repo>` unless given.
+[`install.sh`](install.sh), in order:
+
+1. installs Homebrew, when neither `/opt/homebrew` nor `/usr/local` holds it
+2. installs macelium, `brew install dbaggott/tap/macelium`
+3. when the state repo can't be read without signing in, signs in to GitHub
+   with `gh auth login`, unless `gh` already is, and runs
+   `gh auth setup-git`, so git can fetch it
+4. clones the state repo to `<path>`
+5. runs `macelium bootstrap <path>`, and exits with its status.
+
+It skips each step already done, so pasting it again picks up where it
+stopped. It refuses a `<path>` that holds anything but a clone of the state
+repo, before changing anything.
+
 ## The state repo
 
 A state repo is a git checkout with an upstream. At its root:

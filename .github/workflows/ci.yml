@@ -11,17 +11,20 @@ on:
   pull_request:
     # `ready_for_review` runs CI when a draft is marked ready; the job skips while it is one.
     types: [opened, synchronize, reopened, ready_for_review]
+  # A run on main records the installer against the release a merge publishes.
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ci-required:
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: macos-latest
     defaults:
       run:
@@ -39,9 +42,39 @@ jobs:
 
       - name: Run the checks
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: .github/check.sh "$BASE_SHA..$HEAD_SHA"
+
+      # install.sh as a new Mac runs it, before anything else installs
+      # macelium, so it installs the published release. The example's GitHub
+      # URL resolves to a local copy, so the installer clones it, and reads it
+      # without a sign-in, as it would a public repo. The runner has Homebrew.
+      # A second run must skip every step but the bootstrap.
+      - name: Install from the example with install.sh, then again
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/example-src" remote="$RUNNER_TEMP/example.git"
+          git init -q --bare "$remote"
+          cp -R example "$src"
+          git -C "$src" init -q -b main
+          git -C "$src" add -A
+          git -C "$src" -c user.name=ci -c user.email=ci@example.com commit -q -m example
+          git -C "$src" push -q "$remote" main
+          git -C "$remote" symbolic-ref HEAD refs/heads/main
+          git config --global url."file://$remote".insteadOf https://github.com/macelium-ci/example
+
+          script -q /dev/null bash install.sh macelium-ci/example </dev/null
+
+          again="$RUNNER_TEMP/install-again.log"
+          script -q /dev/null bash install.sh macelium-ci/example </dev/null | tee "$again"
+          for skipped in "Homebrew: already installed" "macelium: already installed" \
+            "GitHub sign-in: not needed" "Clone: $HOME/git/example is already a clone"; do
+            grep -qF "==> $skipped" "$again" || {
+              echo "the second run did not skip: $skipped"
+              exit 1
+            }
+          done
 
       # bootstrap needs a terminal, so it runs under script's. The example
       # becomes a clone of a local bare repo, so its checkout has an upstream.

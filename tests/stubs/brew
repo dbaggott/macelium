@@ -1,11 +1,13 @@
 #!/bin/bash
 # Records the call, reading any Brewfile on stdin. `bundle cleanup` lists $STUB_BREW_UNLISTED, a formula a
-# line, as installed but not listed; every other check finds nothing.
+# line, as installed but not listed, and `list` fails while $STUB_BREW_NOT_INSTALLED is set; every other
+# check finds nothing.
 echo "brew $*" >>"$STUB_LOG"
 for arg in "$@"; do
   if [[ $arg == --file=- ]]; then cat >/dev/null; fi
 done
 case ${1:-} in
+  list) [[ -z ${STUB_BREW_NOT_INSTALLED:-} ]] || exit 1 ;;
   bundle)
     case ${2:-} in
       cleanup)

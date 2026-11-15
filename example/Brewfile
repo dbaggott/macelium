@@ -1,1 +1,2 @@
 brew "hello"
+brew "dbaggott/tap/macelium", trusted: true, start_service: true
