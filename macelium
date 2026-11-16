@@ -546,8 +546,9 @@ macos_differing='' macos_notes=''
 setting_current=''
 # Set by write_settings: whether it had a key to write.
 settings_written=no
-# Set by export_domain; check_macos counts its passes, each exporting afresh.
-export_file='' export_dir='' export_pass=0
+# Set by export_domain. export_keys holds a key per export made in this pass
+# of check_macos, its index naming the export's file.
+export_file='' export_dir='' export_keys=()
 
 # Records a declaration the list got wrong, by its line in the list.
 declaration_error() {
@@ -715,14 +716,16 @@ sandbox_note() {
 # it first.
 remove_export_dir() {
   if [[ -n $export_dir ]]; then rm -rf "$export_dir"; fi
-  export_dir=''
+  export_dir='' export_keys=()
 }
 
 # Takes current or nothing, and a domain. Sets export_file to the domain
 # exported as a plist, once per pass of check_macos. Returns non-zero, with macos_detail set,
 # when defaults cannot export it.
 export_domain() {
-  local host=$1 domain=$2 args=() out status
+  local host=$1 domain=$2 args=() out status i
+  # The domain may be a plist's path, so it keys the file rather than naming it.
+  local key="$host $domain"
   if [[ -z $export_dir ]]; then
     export_dir=$(mktemp -d) || {
       macos_detail="mktemp -d failed"
@@ -730,8 +733,13 @@ export_domain() {
     }
     trap remove_export_dir EXIT
   fi
-  export_file="$export_dir/$export_pass-${host:+$host-}$domain.plist"
-  [[ -f $export_file ]] && return 0
+  for ((i = 0; i < ${#export_keys[@]}; i++)); do
+    if [[ ${export_keys[i]} == "$key" ]]; then
+      export_file="$export_dir/$i.plist"
+      return 0
+    fi
+  done
+  export_file="$export_dir/${#export_keys[@]}.plist"
   [[ $host == current ]] && args+=(-currentHost)
   out=$(defaults "${args[@]+"${args[@]}"}" export "$domain" - 2>&1 >"$export_file")
   status=$?
@@ -740,6 +748,7 @@ export_domain() {
     macos_detail=$(failure_detail "defaults ${args[*]+"${args[*]} "}export $domain" "$out" "$status")
     return 1
   fi
+  export_keys+=("$key")
 }
 
 # Takes a string, and prints it as a JSON string.
@@ -835,7 +844,7 @@ check_macos() {
   macos_detail='' macos_items='' macos_differing='' macos_notes=''
   # Each comparison exports afresh: apply's runs after chezmoi apply, whose
   # scripts may have written the keys.
-  ((export_pass++))
+  export_keys=()
   if [[ -z $list ]]; then
     if [[ -z $repo ]]; then
       macos_result=error macos_detail=$repo_detail
