@@ -26,6 +26,22 @@ test_touch_id_offered_only_when_declared() {
   assert_contains "$out" "OFFERED: Enable Touch ID for sudo"
 }
 
+# Bootstrap offers before its logged settings step, which runs in a subshell.
+test_touch_id_declined_once_not_offered_again() {
+  : >"$sandbox/sudo_local"
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty -- bash -c '
+    source "$1"
+    sudo_local=$2
+    touch_id_declared=yes
+    confirm() { echo "OFFERED: $1"; return 1; }
+    enable_touch_id_sudo
+    ( enable_touch_id_sudo )
+  ' _ "$tool" "$sandbox/sudo_local"
+  assert_status 0
+  [[ $(grep -cF "OFFERED: Enable Touch ID for sudo" "$out") == 1 ]] || fail "expected exactly one offer"
+}
+
 test_touch_id_takes_no_arguments() {
   offer_touch_id $'touch_id_sudo yes\n'
   assert_status 1
