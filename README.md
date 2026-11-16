@@ -216,8 +216,10 @@ is missing. It then asks for sudo once, prints the manifest's `init_notes`
 when the machine has no chezmoi config, runs `chezmoi init`, and applies the
 files. Each chezmoi script, and each of `apply`'s steps, then runs as its own
 step, so one that fails stops none after it, with its output in
-`~/Library/Logs/macelium-bootstrap.log`. It ends with the plan, each step's
-result, and the manual steps. It needs a terminal.
+`~/Library/Logs/macelium-bootstrap.log`. While a step runs, a status line
+shows its time so far and the download Homebrew is making, and gives way to
+any sudo password prompt. It ends with the plan, each step's result, and the
+manual steps. It needs a terminal.
 
 **`settings`** writes the macOS settings that differ from the list, the state
 repo's unless `--file` names another, without asking, and restarts the apps

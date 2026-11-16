@@ -16,6 +16,11 @@ contract than its own.
 
 ## Unreleased
 
+- While a `bootstrap` step runs, one status line, redrawn in place, shows its
+  time so far and the download Homebrew is making, with its rate, or that it
+  stalled. It replaces the line each minute saying the step is still running,
+  which is still what a log gets. A sudo password prompt is left on screen,
+  with a line pointing at it.
 - `plan` warns when `~/.config/macelium/Brewfile.local` exists and the state
   repo has no Brewfile, since macelium reads the local file only alongside
   it.

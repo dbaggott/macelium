@@ -15,7 +15,7 @@ setup_sandbox() {
   cp "$(dirname "$tool")"/tests/stubs/* "$sandbox/bin/"
   export PATH=$sandbox/bin:$PATH
   unset XDG_CONFIG_HOME STUB_SOURCE_PATH STUB_CHEZMOI_STATUS STUB_CHEZMOI_MANAGED STUB_CHEZMOI_APPLY_READS STUB_BREW_UNLISTED STUB_BREW_OUTDATED \
-    STUB_BREW_UPGRADE_FAILS STUB_BREW_PREFIX MACELIUM_UPGRADED_FROM
+    STUB_BREW_UPGRADE_FAILS STUB_BREW_PREFIX STUB_BREW_CACHE MACELIUM_UPGRADED_FROM
   : >"$STUB_LOG"
 }
 
@@ -66,6 +66,17 @@ run_tty() {
     fi
     sleep 1
   } | script -q /dev/null "$@" | tr -d '\r' >"$out"
+  status=${PIPESTATUS[1]}
+}
+
+# Takes how many seconds to hold the terminal's input open, then the command
+# and its arguments. Runs it on a terminal as run_tty does, with no answers,
+# keeping what the terminal showed as raw bytes, \r and escapes included.
+run_tty_raw() {
+  local hold=$1
+  shift
+  out=$sandbox/out err=$sandbox/out
+  sleep "$hold" | script -q /dev/null "$@" >"$out"
   status=${PIPESTATUS[1]}
 }
 
