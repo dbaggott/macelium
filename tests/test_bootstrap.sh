@@ -148,6 +148,23 @@ test_logged_step_leaves_a_sudo_prompt_on_screen() {
   [[ $(grep -cF "$waiting_hint_text" "$out") == 1 ]] || fail "the waiting line is not shown once"
 }
 
+test_logged_step_clears_the_status_after_a_sudo_that_never_prompted() {
+  mkdir -p "$sandbox/standin"
+  ln -s /bin/bash "$sandbox/standin/sudo"
+  mkfifo "$sandbox/answer"
+  # Only the tick at 1 s sees the sudo, so no hint moves the cursor off the
+  # status line. The output line comes once it has gone, with no Return typed.
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  logged_step_on_tty bash -c 'sleep 0.5; { sleep 1; echo >"$2"; } & "$1" -c "read -r _ <\"\$0\"" "$2"; echo "Installing b"' \
+    _ "$sandbox/standin/sudo" "$sandbox/answer"
+  assert_status 0
+  local raw before
+  raw=$(cat "$out")
+  [[ $raw == *"Installing b"* ]] || fail "no output line"
+  before=${raw%%Installing b*}
+  [[ $before == *$'\033[K' || $before == *$'\n' ]] || fail "the output line follows status text"
+}
+
 test_logged_step_starts_each_output_line_on_a_clear_line() {
   logged_step_on_tty bash -c 'echo "Installing a"; sleep 1.5; echo unfiltered; echo "Installing b"; sleep 1.5'
   assert_status 0

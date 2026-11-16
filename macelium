@@ -1865,11 +1865,13 @@ step_tick() {
   status_line=$(step_status "$name" "$seconds" "$cache" "$sizes" "$n")
   waiting=$(prompting_sudo "$(process_tree)" "$$")
   if [[ -n $waiting ]]; then
-    drawn=no
+    # The status stays drawn: a sudo that goes without a Return reaching the
+    # terminal, such as one answered by Touch ID, leaves it on the line.
     if [[ $waiting == "$previous" && $waiting != "$hinted" ]]; then
       [[ $on_tty == yes ]] && printf '\n'
       echo "$waiting_hint"
       hinted=$waiting
+      drawn=no
     fi
   elif [[ $on_tty == yes ]]; then
     columns=$(terminal_columns)
