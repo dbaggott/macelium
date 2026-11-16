@@ -21,6 +21,11 @@ contract than its own.
   stalled. It replaces the line each minute saying the step is still running,
   which is still what a log gets. A sudo password prompt is left on screen,
   with a line pointing at it.
+- `plan` warns when `~/.config/macelium/Brewfile.local` exists and the state
+  repo has no Brewfile, since macelium reads the local file only alongside
+  it.
+- `bootstrap` runs a chezmoi script whose path holds a space, rather than
+  splitting the path into steps that apply nothing.
 
 ## 0.2.1
 

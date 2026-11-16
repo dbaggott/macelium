@@ -208,3 +208,25 @@ test_logged_step_returns_at_once_when_its_command_does() {
   run_logged_step quick true >/dev/null
   ((SECONDS - started < 2)) || fail "took $((SECONDS - started)) s with a tick of $tick s"
 }
+
+test_bootstrap_applies_a_script_whose_path_has_a_space() {
+  make_state macelium.conf $'contract 1\n'
+  export STUB_CHEZMOI_MANAGED=$'.local/run once/setup.sh\n.local/other.sh\n'
+  run_tty -- "$tool" bootstrap "$state"
+  # The log joins arguments with spaces, so it shows a split path as one
+  # apply line for each fragment.
+  local applies
+  applies=$(grep "^chezmoi apply --source $state $HOME/" "$STUB_LOG")
+  [[ $applies == "chezmoi apply --source $state $HOME/.local/run once/setup.sh"$'\n'"chezmoi apply --source $state $HOME/.local/other.sh" ]] ||
+    fail "the scripts' apply lines are:"$'\n'"$applies"
+}
+
+test_bootstrap_script_reading_input_leaves_the_list_alone() {
+  make_state macelium.conf $'contract 1\n'
+  export STUB_CHEZMOI_MANAGED=$'.local/first.sh\n.local/second.sh\n' STUB_CHEZMOI_APPLY_READS=1
+  run_tty -- "$tool" bootstrap "$state"
+  assert_contains "$STUB_LOG" "chezmoi apply --source $state $HOME/.local/first.sh"
+  assert_contains "$STUB_LOG" "chezmoi apply --source $state $HOME/.local/second.sh"
+  assert_not_contains "$STUB_LOG" "read stdin: .local/"
+  assert_not_contains "$STUB_LOG" "read fd 3: .local/"
+}
