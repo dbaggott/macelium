@@ -536,6 +536,8 @@ setting_host=() setting_domain=() setting_key=() setting_type=() setting_value=(
 restart_domain=() restart_app=()
 sandbox_domain=() sandbox_app=() sandbox_state=()
 touch_id_declared=no
+# Set when the operator declines Touch ID for sudo, so a run offers it once.
+touch_id_declined=no
 list_errors=''
 
 macos_result='' macos_detail='' macos_items=''
@@ -961,7 +963,7 @@ restarts_for() {
 }
 
 enable_touch_id_sudo() {
-  [[ $touch_id_declared == yes ]] || return 0
+  [[ $touch_id_declared == yes && $touch_id_declined == no ]] || return 0
   if grep -qE '^[[:space:]]*auth[[:space:]]+sufficient[[:space:]]+pam_tid\.so' \
     "$sudo_local" 2>/dev/null; then
     return
@@ -974,6 +976,7 @@ enable_touch_id_sudo() {
     return
   fi
   if ! confirm "Enable Touch ID for sudo in $sudo_local? This uses sudo." no; then
+    touch_id_declined=yes
     warn "Touch ID for sudo was skipped: run \`macelium settings\` to be asked again"
     return
   fi

@@ -16,6 +16,9 @@ contract than its own.
 
 ## Unreleased
 
+- `bootstrap` asks about Touch ID for sudo once: declining it before the
+  password prompt no longer brings a second offer after the macOS settings
+  are written.
 - While a `bootstrap` step runs, one status line, redrawn in place, shows its
   time so far and the download Homebrew is making, with its rate, or that it
   stalled. It replaces the line each minute saying the step is still running,
