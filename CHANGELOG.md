@@ -14,7 +14,7 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
-## Unreleased
+## 0.2.2
 
 - `bootstrap` asks about Touch ID for sudo once: declining it before the
   password prompt no longer brings a second offer after the macOS settings
