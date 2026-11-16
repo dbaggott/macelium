@@ -546,9 +546,9 @@ macos_differing='' macos_notes=''
 setting_current=''
 # Set by write_settings: whether it had a key to write.
 settings_written=no
-# Set by export_domain; check_macos counts its passes, each exporting afresh.
-# export_keys holds a key per export made, its index naming the export's file.
-export_file='' export_dir='' export_pass=0 export_keys=()
+# Set by export_domain. export_keys holds a key per export made in this pass
+# of check_macos, its index naming the export's file.
+export_file='' export_dir='' export_keys=()
 
 # Records a declaration the list got wrong, by its line in the list.
 declaration_error() {
@@ -725,7 +725,7 @@ remove_export_dir() {
 export_domain() {
   local host=$1 domain=$2 args=() out status i
   # The domain may be a plist's path, so it keys the file rather than naming it.
-  local key="$export_pass $host $domain"
+  local key="$host $domain"
   if [[ -z $export_dir ]]; then
     export_dir=$(mktemp -d) || {
       macos_detail="mktemp -d failed"
@@ -844,7 +844,7 @@ check_macos() {
   macos_detail='' macos_items='' macos_differing='' macos_notes=''
   # Each comparison exports afresh: apply's runs after chezmoi apply, whose
   # scripts may have written the keys.
-  ((export_pass++))
+  export_keys=()
   if [[ -z $list ]]; then
     if [[ -z $repo ]]; then
       macos_result=error macos_detail=$repo_detail
