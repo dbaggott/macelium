@@ -52,7 +52,7 @@ test_bootstrap_says_when_it_asks_for_the_password() {
   make_state macelium.conf $'contract 1\n'
   export STUB_SUDO_ASKS=1
   run_tty -- "$tool" bootstrap "$state"
-  assert_order "$out" "You'll be asked for your password now." "==> chezmoi init"
+  assert_order "$out" "You'll be asked to authenticate now." "STUB sudo Password:"
   assert_not_contains "$out" "$homebrew_asks_text"
 }
 
@@ -60,7 +60,7 @@ test_bootstrap_with_cached_credentials_and_no_brewfile_says_neither() {
   make_state macelium.conf $'contract 1\n'
   run_tty -- "$tool" bootstrap "$state"
   assert_contains "$out" "==> chezmoi init"
-  assert_not_contains "$out" "You'll be asked for your password"
+  assert_not_contains "$out" "You'll be asked to authenticate"
   assert_not_contains "$out" "$homebrew_asks_text"
 }
 

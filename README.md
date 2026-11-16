@@ -214,8 +214,9 @@ again at any point after. It first checks what it needs from macOS, App
 Management and Full Disk Access for the terminal, and stops naming each that
 is missing. It then asks for sudo once for its own steps, prints the
 manifest's `init_notes` when the machine has no chezmoi config, runs
-`chezmoi init`, and applies the files. Each chezmoi script, and each of `apply`'s steps, then runs as its own
-step, so one that fails stops none after it, with its output in
+`chezmoi init`, and applies the files. Each chezmoi script, and each of
+`apply`'s steps, then runs as its own step, so one that fails stops none
+after it, with its output in
 `~/Library/Logs/macelium-bootstrap.log`. While a step runs, a status line
 shows its time so far and the download Homebrew is making, and gives way to
 any sudo password prompt. Homebrew discards sudo's credentials the first time

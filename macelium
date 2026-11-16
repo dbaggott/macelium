@@ -1701,7 +1701,7 @@ start_sudo() {
   echo "The bootstrap installs your applications, and the first run can take a long time."
   # sudo reuses credentials it was given recently, in this terminal, without asking.
   if ! sudo -n true 2>/dev/null; then
-    echo "You'll be asked for your password now."
+    echo "You'll be asked to authenticate now."
   fi
   if [[ -e $state_brewfile ]]; then
     echo "Homebrew will ask you to authenticate again during each brew bundle step that"

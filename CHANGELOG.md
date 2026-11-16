@@ -20,7 +20,7 @@ contract than its own.
   Homebrew discards sudo's credentials the first time it needs sudo, so each
   `brew bundle` step that installs a cask needing sudo asks once. With a
   Brewfile, `bootstrap` says so up front, and it still says when it is about
-  to ask for the password itself.
+  to ask itself.
 
 ## 0.2.2
 
