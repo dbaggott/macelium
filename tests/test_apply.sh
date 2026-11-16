@@ -143,3 +143,18 @@ test_apply_stops_when_the_upgraded_macelium_is_not_under_the_prefix() {
   assert_not_contains "$STUB_LOG" "chezmoi apply"
   assert_not_contains "$STUB_LOG" "brew bundle --file"
 }
+
+# apply compares the settings twice, at its plan and again before writing
+# them, and each comparison exports a domain once, apart from its current-host
+# settings.
+test_apply_exports_each_domain_once_per_comparison() {
+  make_state macelium.conf $'contract 1\n' \
+    macos.sh $'setting com.example.a one string x\nsetting com.example.a two string y\nsetting --current-host com.example.a three string z\nsetting --current-host com.example.a four string w\n'
+  run_tty y -- "$tool" apply
+  assert_status 0
+  local n
+  n=$(grep -cxF "defaults export com.example.a -" "$STUB_LOG")
+  ((n == 2)) || fail "exported com.example.a $n times, expected 2"
+  n=$(grep -cxF "defaults -currentHost export com.example.a -" "$STUB_LOG")
+  ((n == 2)) || fail "exported com.example.a for the current host $n times, expected 2"
+}

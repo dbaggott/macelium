@@ -24,6 +24,9 @@ contract than its own.
 - `plan` warns when `~/.config/macelium/Brewfile.local` exists and the state
   repo has no Brewfile, since macelium reads the local file only alongside
   it.
+- A setting whose domain is a plist's path, such as
+  `~/Library/Preferences/com.example.plist`, is compared, rather than making
+  every `plan` report an error in the macOS settings.
 - `bootstrap` runs a chezmoi script whose path holds a space, rather than
   splitting the path into steps that apply nothing.
 
