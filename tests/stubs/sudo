@@ -1,7 +1,9 @@
 #!/bin/bash
-# Records the call. Asks for nothing, and runs a command as this user.
+# Records the call. Asks for nothing, and runs a command as this user. `-n`
+# fails, as sudo with no cached credentials does, when $STUB_SUDO_ASKS is set.
 echo "sudo $*" >>"$STUB_LOG"
 case ${1:-} in
-  -v | -n) exit 0 ;;
+  -n) [[ -z ${STUB_SUDO_ASKS:-} ]]; exit ;;
+  -v) exit 0 ;;
 esac
 "$@"

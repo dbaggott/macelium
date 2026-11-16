@@ -38,6 +38,32 @@ test_bootstrap_skips_init_notes_with_a_chezmoi_config() {
   assert_not_contains "$out" "NOTES:"
 }
 
+# What the bootstrap says before sudo asks.
+
+homebrew_asks_text='Homebrew will ask you to authenticate again'
+
+test_bootstrap_with_a_brewfile_says_homebrew_asks_again() {
+  make_state macelium.conf $'contract 1\n' Brewfile $'cask "example"\n'
+  run_tty -- "$tool" bootstrap "$state"
+  assert_order "$out" "$homebrew_asks_text" "==> chezmoi init"
+}
+
+test_bootstrap_says_when_it_asks_for_the_password() {
+  make_state macelium.conf $'contract 1\n'
+  export STUB_SUDO_ASKS=1
+  run_tty -- "$tool" bootstrap "$state"
+  assert_order "$out" "You'll be asked for your password now." "==> chezmoi init"
+  assert_not_contains "$out" "$homebrew_asks_text"
+}
+
+test_bootstrap_with_cached_credentials_and_no_brewfile_says_neither() {
+  make_state macelium.conf $'contract 1\n'
+  run_tty -- "$tool" bootstrap "$state"
+  assert_contains "$out" "==> chezmoi init"
+  assert_not_contains "$out" "You'll be asked for your password"
+  assert_not_contains "$out" "$homebrew_asks_text"
+}
+
 # A logged step's status line, its sudo detection, and its output.
 
 sha=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

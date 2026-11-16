@@ -32,8 +32,9 @@
 # chezmoi's config names, before anything is applied or again at any point
 # after. It first checks what it needs from macOS, App Management and Full
 # Disk Access for the terminal, and stops naming each that is missing. It then
-# asks for sudo once, runs chezmoi init and applies the files, then runs each
-# chezmoi script and each of apply's steps as its own step, so one that fails
+# asks for sudo once for its own steps (Homebrew asks again when a cask needs
+# sudo), runs chezmoi init and applies the files, then runs each chezmoi
+# script and each of apply's steps as its own step, so one that fails
 # stops none after it, with the output in its log. It ends with the plan, each
 # step's result, and the manual steps.
 #
@@ -51,7 +52,7 @@
 set -uo pipefail
 
 # A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.2.2"
+VERSION="0.2.3"
 # How brew bundle check names macelium in a state repo's Brewfile, whose line
 # for it README.md ("The Brewfile's macelium line") gives.
 self_formula=dbaggott/tap/macelium
@@ -1690,8 +1691,9 @@ check_preflight() {
   fi
 }
 
-# Asks for the password once, and keeps sudo's credentials fresh until the
-# bootstrap exits, so the casks that run sudo partway through don't ask again.
+# Asks for the password once for macelium's own steps, and keeps sudo's
+# credentials fresh until the bootstrap exits. Homebrew discards them the
+# first time a brew process needs sudo, so a cask that runs sudo asks again.
 start_sudo() {
   local keeper
   enable_touch_id_sudo
@@ -1699,8 +1701,11 @@ start_sudo() {
   echo "The bootstrap installs your applications, and the first run can take a long time."
   # sudo reuses credentials it was given recently, in this terminal, without asking.
   if ! sudo -n true 2>/dev/null; then
-    echo "You'll be asked for your password at least once, and possibly more times depending"
-    echo "on the applications being installed."
+    echo "You'll be asked for your password now."
+  fi
+  if [[ -e $state_brewfile ]]; then
+    echo "Homebrew will ask you to authenticate again during each brew bundle step that"
+    echo "installs an application needing sudo, once in each step."
   fi
   echo
   sudo -v || return 1

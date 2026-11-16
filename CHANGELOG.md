@@ -14,6 +14,14 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.2.3
+
+- `bootstrap` no longer implies the casks won't ask for the password again.
+  Homebrew discards sudo's credentials the first time it needs sudo, so each
+  `brew bundle` step that installs a cask needing sudo asks once. With a
+  Brewfile, `bootstrap` says so up front, and it still says when it is about
+  to ask for the password itself.
+
 ## 0.2.2
 
 - `bootstrap` asks about Touch ID for sudo once: declining it before the
