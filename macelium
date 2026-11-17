@@ -2382,7 +2382,6 @@ ask_value() {
     if ! read -r answer </dev/tty; then
       printf '\n' >/dev/tty
       [[ -n $2 ]] || return 1
-      answer=''
     fi
     [[ -n $answer ]] || answer=$2
     if [[ -n $answer ]]; then
@@ -2484,9 +2483,8 @@ offer_capture() {
 }
 
 # Takes zshrc or gitconfig, the file's path under the home directory, and its
-# .local file's.
-# Lists the file's lines that look like secrets, and offers to move them to
-# the .local file. Sets capture_kept to the file as it goes into the state
+# .local file's. Lists the file's lines that look like secrets, and offers to
+# move them to the .local file. Sets capture_kept to the file as it goes into the state
 # repo, and capture_moved to the lines moved.
 offer_move() {
   local numbers sections=0 moved
