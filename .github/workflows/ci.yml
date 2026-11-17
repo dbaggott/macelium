@@ -42,6 +42,7 @@ jobs:
         run: brew install chezmoi mise gitleaks shellcheck
 
       - name: Run the checks
+        timeout-minutes: 15
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -50,6 +51,7 @@ jobs:
       # bootstrap needs a terminal, so it runs under script's. The example
       # becomes a clone of a local bare repo, so its checkout has an upstream.
       - name: Bootstrap the example, then plan it
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           state="$RUNNER_TEMP/state"
@@ -76,9 +78,15 @@ jobs:
       # install. The example's GitHub URL resolves to a local copy, which the
       # installer clones, and git reads it without a sign-in. The runner has
       # Homebrew. A second run must skip every step but the bootstrap.
+      #
+      # expect answers install.sh's prompts by their text: under script, only
+      # the first read of the terminal gets end-of-file. It declines the
+      # GitHub sign-in, which would open a browser. A prompt it doesn't know
+      # fails the run after five minutes with no output.
       - name: Install from the example with install.sh, then again
+        timeout-minutes: 15
         env:
-          # On a terminal, brew install asks before installing; script's
+          # On a terminal, brew install asks before installing; expect's
           # terminal here has no one to answer.
           HOMEBREW_NO_ASK: 1
         run: |
@@ -95,13 +103,29 @@ jobs:
           git -C "$src" push -q "$remote" main
           git -C "$remote" symbolic-ref HEAD refs/heads/main
           git config --global url."file://$remote".insteadOf https://github.com/macelium-ci/example
+          # The first of the directories install.sh puts a clone in.
+          mkdir -p ~/Developer
 
-          script -q /dev/null bash install.sh macelium-ci/example </dev/null
+          run_install() {
+            /usr/bin/expect -c '
+              set timeout 300
+              spawn bash install.sh macelium-ci/example
+              expect {
+                "so you can push changes from this machine?" { send "n\r"; exp_continue }
+                timeout { puts "\nexpect: no output for 300s, so a prompt it does not know is waiting"; exit 1 }
+                eof
+              }
+              exit [lindex [wait] 3]
+            '
+          }
+
+          run_install
 
           again="$RUNNER_TEMP/install-again.log"
-          script -q /dev/null bash install.sh macelium-ci/example </dev/null | tee "$again"
+          run_install | tee "$again"
           for skipped in "Homebrew: already installed" "macelium: already installed" \
-            "GitHub sign-in: not needed, git can read" "Clone: $HOME/git/example is already a clone"; do
+            "GitHub sign-in: not needed, git can read" "Clone: $HOME/Developer/example is already a clone" \
+            "GitHub sign-in: skipped"; do
             grep -qF "==> $skipped" "$again" || {
               echo "the second run did not skip: $skipped"
               exit 1

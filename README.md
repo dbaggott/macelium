@@ -16,27 +16,44 @@ It needs macOS, Homebrew, chezmoi, mise and jq.
 
 ## Install
 
-On a new Mac, paste this into Terminal, with your state repo's GitHub
-`<owner>/<repo>`, and follow what it asks:
+On a new Mac, paste this into Terminal, with your state repo, and follow
+what it asks:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dbaggott/macelium/main/install.sh | bash -s <owner>/<repo> [<path>]
+curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh | bash -s <repo> [<path>]
 ```
 
-`<path>` is where the state repo is cloned, `~/git/<repo>` unless given.
+`<repo>` is a GitHub `<owner>/<repo>`, or the repo's git URL on any host:
+`https://host/path`, `ssh://user@host/path`, or `user@host:path`.
+
+`<path>` is where the state repo is cloned. Unless given, it is
+`<dir>/<name>`, with the repo's name, where `<dir>` is the first of `~/Developer`, `~/git`,
+`~/src`, `~/code` and `~/Projects` that exists, else your home directory.
+The installer prints the path it chose.
+
 [`install.sh`](install.sh), in order:
 
 1. installs Homebrew, when neither `/opt/homebrew` nor `/usr/local` holds it
 2. installs macelium, `brew install dbaggott/tap/macelium`
-3. when the state repo can't be read without signing in, signs in to GitHub
+3. on GitHub, when the state repo can't be read without signing in, signs in
    with `gh auth login`, unless `gh` already is, and runs
-   `gh auth setup-git`, so git can fetch it
+   `gh auth setup-git`, so git can fetch it. On another host, it says the
+   host needs a personal access token or a registered SSH key, since account
+   passwords are refused over HTTPS, and leaves the sign-in to git and its
+   credential helper.
 4. clones the state repo to `<path>`
-5. runs `macelium bootstrap <path>`, and exits with its status.
+5. runs `macelium bootstrap <path>`, and exits with its status if it fails
+6. on GitHub, when the state repo was read without signing in and `gh` isn't
+   signed in, offers the same sign-in, so you can push changes from this
+   machine. It defaults to yes.
+
+`gh auth login` asks for its minimum scopes, `repo`, `read:org` and `gist`,
+and `repo` reaches every repo the account can, not only the state repo.
 
 It skips each step already done, so pasting it again picks up where it
 stopped. It refuses a `<path>` that holds anything but a clone of the state
-repo, before changing anything.
+repo, before changing anything. A clone counts whichever URL form names its
+remote; on GitHub, in any case.
 
 ## The state repo
 

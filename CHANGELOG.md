@@ -14,6 +14,22 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.3.0
+
+- `install.sh` takes a git URL on any host, `https://`, `ssh://` or
+  `user@host:path`, as well as a GitHub `<owner>/<repo>`. An existing clone
+  counts whichever form names its remote. For a host other than GitHub it
+  says the host needs a personal access token or a registered SSH key, and
+  leaves the sign-in to git.
+- With no path, `install.sh` clones to the first of `~/Developer`, `~/git`,
+  `~/src`, `~/code` and `~/Projects` that exists, else the home directory,
+  and prints the path.
+- After bootstrapping a GitHub repo it read without a sign-in, `install.sh`
+  offers `gh auth login` and `gh auth setup-git`, so you can push from the
+  Mac.
+- Each release attaches `install.sh`, and the README's command fetches it
+  from the latest release rather than `main`.
+
 ## 0.2.5
 
 - `bootstrap` opens with a banner: mycelium spreads under a ground line, and
