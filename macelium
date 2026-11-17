@@ -1846,7 +1846,7 @@ step_status() {
 # is one line redrawn in place; elsewhere it is a line each minute.
 #
 # sudo writes its prompt with no newline, at the end of the status line, so
-# while a sudo below the bootstrap asks (prompting_sudo), nothing clears a
+# while a sudo below this macelium asks (prompting_sudo), nothing clears a
 # line: each write starts on a new one, and no status is drawn.
 show_step() {
   local name=$1 on_tty=$2 cache=$3 sizes=$4
@@ -1869,7 +1869,7 @@ show_step() {
   step_clear
 }
 
-# Prints the bootstrap's processes, for prompting_sudo.
+# Prints every process, for prompting_sudo.
 process_tree() {
   ps -A -o pid=,ppid=,comm=
 }
