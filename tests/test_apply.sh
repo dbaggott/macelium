@@ -22,6 +22,49 @@ test_apply_runs_steps_in_order() {
     "hook one ran"
 }
 
+# apply's brew bundle and mise install steps run as logged steps: their
+# output goes to macelium-apply.log, and the terminal shows only Homebrew's
+# progress lines.
+
+apply_log_path() {
+  echo "$HOME/Library/Logs/macelium-apply.log"
+}
+
+test_apply_logs_its_brew_bundle_and_mise_install_steps() {
+  make_state macelium.conf $'contract 1\n' Brewfile $'brew "hello"\n'
+  export STUB_CHEZMOI_STATUS=' M .zshrc'$'\n'
+  export STUB_BREW_BUNDLE_OUTPUT=$'Using hello\nInstalling tree\nUpgrading wget\nTapping some/tap\nDownloading tree.tar.gz'
+  run_tty y -- "$tool" apply
+  assert_status 0
+  local log
+  log=$(apply_log_path)
+  assert_contains "$out" "==> brew bundle (output in $log)"
+  assert_contains "$out" "==> mise install (output in $log)"
+  assert_contains "$out" "Installing tree"
+  assert_contains "$out" "Upgrading wget"
+  assert_contains "$out" "Tapping some/tap"
+  assert_not_contains "$out" "Using hello"
+  assert_not_contains "$out" "Downloading tree.tar.gz"
+  assert_contains "$log" "brew bundle --file=$state/Brewfile"
+  assert_contains "$log" "mise -C $HOME install"
+  assert_contains "$log" "Using hello"
+  assert_contains "$log" "Downloading tree.tar.gz"
+  assert_contains "$log" "Installing tree"
+  assert_contains "$out" "Apply complete"
+}
+
+test_apply_stops_when_brew_bundle_fails() {
+  make_state macelium.conf $'contract 1\n' Brewfile $'brew "hello"\n'
+  export STUB_CHEZMOI_STATUS=' M .zshrc'$'\n'
+  export STUB_BREW_BUNDLE_FAILS=1
+  run_tty y -- "$tool" apply
+  assert_status 1
+  assert_order "$out" "Failed, exit status 1:" "Error: the bundle failed" "macelium apply: stopped: brew bundle failed"
+  assert_contains "$(apply_log_path)" "Error: the bundle failed"
+  assert_not_contains "$STUB_LOG" "mise -C $HOME install"
+  assert_not_contains "$out" "Apply complete"
+}
+
 test_apply_declined_changes_nothing() {
   make_state macelium.conf $'contract 1\n' \
     apps/one/after-apply $'echo "hook one ran" >>"$STUB_LOG"\n'

@@ -192,6 +192,13 @@ macOS notification when the exit status is not 0.
 4. the macOS settings that still differ
 5. the apps hooks, when the plan listed them.
 
+While `brew bundle` or `mise install` runs, a status line shows the step's
+time so far and the download Homebrew is making, and gives way to any sudo
+password prompt. The terminal shows only Homebrew's `Tapping`, `Installing`
+and `Upgrading` lines, and the step's full output is in
+`~/Library/Logs/macelium-apply.log`. When a step fails, `apply` prints its
+errors and stops.
+
 It upgrades only when the plan showed upgrades. When a check failed, the plan
 is partial and `apply` stops without asking. It never removes anything: a
 package installed but not listed stays until it is listed or uninstalled by
@@ -247,6 +254,8 @@ that read them.
   doesn't read, exists.
 - `~/.local/state/macelium/apps-hooks.sha256`: the hash the apps hooks last
   all succeeded at.
+- `~/Library/Logs/macelium-apply.log`: the output of each `apply`'s
+  `brew bundle` and `mise install` steps.
 - `~/Library/Logs/macelium-bootstrap.log`: each bootstrap step's output.
 - `~/Library/Logs/macelium-drift.log`: the daily `plan --notify`'s line, and
   anything it prints to stderr, from the formula's service.

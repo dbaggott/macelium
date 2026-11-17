@@ -14,6 +14,16 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.2.4
+
+- `apply` shows `bootstrap`'s status line while it runs `brew bundle` or
+  `mise install`: the step's time so far and the download Homebrew is
+  making, giving way to any sudo password prompt. The
+  terminal shows only Homebrew's `Tapping`, `Installing` and `Upgrading`
+  lines, and the steps' full output is in
+  `~/Library/Logs/macelium-apply.log`. A long source build or cask download
+  no longer looks like a hang.
+
 ## 0.2.3
 
 - `bootstrap` no longer implies the casks won't ask for the password again.
