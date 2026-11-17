@@ -2090,10 +2090,10 @@ banner_stages=(
   "   .-~~~~~-.   ; .'  o   o  '. ;(_____________);      | |      ;      | |      "
 )
 
-# Plays the banner on the terminal: mycelium spreads from a spore below a
-# ground line, then mushrooms fruit above it, and macelium's name follows. It
-# is 64 columns by 15 rows, in color unless NO_COLOR is set, and a smaller
-# terminal gets none. Each frame redraws the last by moving up over it.
+# Plays the banner on the terminal: a spore drifts down onto a ground line,
+# mycelium spreads from it below the line, then mushrooms fruit above it, and
+# macelium's name follows. It is 64 columns by 15 rows, in color unless
+# NO_COLOR is set, and a smaller terminal gets none. Each frame redraws the last by moving up over it.
 print_banner() {
   local width=64 rows=12 ground=6 grid=() kind=() blank='' surface='' drawn=no
   local tip_r=() tip_c=() tip_d=() i r c d n nr nc ch dr alive step tick s
@@ -2117,12 +2117,25 @@ print_banner() {
   printf '\033[?25l'
   trap 'printf "\033[?25h"' EXIT
 
-  # Two tips grow from the spore, one each way, and branch. Only branches
+  # The spore drifts down near the middle and settles on the ground line,
+  # then roots through it.
+  c=$((width / 2 - 6 + RANDOM % 13))
+  for ((r = 0; r < ground; r++)); do
+    banner_put "$r" "$c" '*' t
+    banner_frame 0.14
+    ((r < ground - 1)) || break
+    banner_put "$r" "$c" ' ' ' '
+    c=$((c + RANDOM % 3 - 1))
+  done
+  banner_frame 0.3
+  for ((r = ground + 1; r <= ground + 2; r++)); do
+    banner_put "$r" "$c" '|' t
+    banner_frame 0.12
+  done
+
+  # Two tips grow from the root, one each way, and branch. Only branches
   # die early, so the mycelium always spans the width.
-  c=$((width / 2))
-  banner_put $((ground + 2)) "$c" '@' t
   tip_r=($((ground + 2)) $((ground + 2))) tip_c=("$c" "$c") tip_d=(-1 1)
-  banner_frame 0.05
   for ((step = 0; step < width; step++)); do
     n=${#tip_r[@]} alive=0
     for ((i = 0; i < n; i++)); do
