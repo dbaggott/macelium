@@ -147,6 +147,20 @@ test_init_templates_the_gitconfig() {
   [[ ! -e $HOME/.gitconfig.local ]] || fail "wrote ~/.gitconfig.local with nothing to move"
 }
 
+test_init_gitconfig_template_renders_as_the_original() {
+  init_mac
+  home_file .gitconfig $'[user]\n\tname = Git Name\n\temail = git@example.com\n[alias]\n\tps = !docker ps --format \'{{.Names}} {{ .Image }}\'\n'
+  run_tty '' '' y -- "$tool" init "$repo"
+  assert_status 0
+  # The real chezmoi, past the stub.
+  local chezmoi rendered
+  chezmoi=$(PATH=${PATH#"$sandbox/bin:"} command -v chezmoi) || fail "chezmoi is not installed"
+  rendered=$("$chezmoi" --source "$repo/home" execute-template <"$repo/home/dot_gitconfig.tmpl") ||
+    fail "the template did not render: $rendered"
+  [[ $rendered == "$(cat "$HOME/.gitconfig")"$'\n\n[include]\n\tpath = ~/.gitconfig.local' ]] ||
+    fail "rendered: $rendered"
+}
+
 test_init_ends_the_zshrc_with_the_local_line() {
   init_mac
   git_user
