@@ -2,9 +2,9 @@ name: release
 
 # A merge to main that bumps VERSION= in the macelium script IS a release:
 # this workflow tags the commit v<VERSION>, publishes a GitHub Release with
-# generated notes, and updates the Homebrew tap formula. Pushes that don't
-# change VERSION (or re-runs after a release) find the tag already present
-# and skip the tag/release step. Tagging, releasing, and the tap update
+# generated notes and install.sh attached, and updates the Homebrew tap
+# formula. Pushes that don't change VERSION (or re-runs after a release)
+# find the tag already present and skip the tag/release step. Tagging, releasing, and the tap update
 # live in one workflow because tags created with the workflow's
 # GITHUB_TOKEN do not trigger other workflows. The verify job then installs
 # what the tap now holds and checks the service's plist
@@ -79,7 +79,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.meta.outputs.tag }}" \
+          gh release create "${{ steps.meta.outputs.tag }}" install.sh \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "${{ steps.meta.outputs.tag }}" \
