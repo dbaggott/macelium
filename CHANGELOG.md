@@ -14,6 +14,13 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.3.1
+
+- `bootstrap`'s banner opens with a spore drifting down onto the ground line
+  and sinking just below it, and the mycelium spreads from there along
+  branching paths rather than as an even front. The largest mushroom has a
+  rounder cap, and the banner takes a little longer to play.
+
 ## 0.3.0
 
 - `install.sh` takes a git URL on any host, `https://`, `ssh://` or
