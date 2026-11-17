@@ -193,9 +193,10 @@ macOS notification when the exit status is not 0.
 5. the apps hooks, when the plan listed them.
 
 While `brew bundle` or `mise install` runs, a status line shows the step's
-time so far and the download Homebrew is making, and gives way to any sudo
-password prompt. The terminal shows only Homebrew's `Tapping`, `Installing`
-and `Upgrading` lines, and the step's full output is in
+time so far and the download Homebrew is making, behind a growing mushroom,
+and gives way to any sudo password prompt. The terminal shows only
+Homebrew's `Tapping`, `Installing` and `Upgrading` lines, and the step's
+full output is in
 `~/Library/Logs/macelium-apply.log`. When a step fails, `apply` prints its
 errors and stops.
 
@@ -217,19 +218,20 @@ left to `brew bundle` with the rest. When
 
 **`bootstrap`** sets up a machine from `<checkout>`, which must hold
 `macelium.conf`, or else from the checkout chezmoi's config names. It can run
-again at any point after. It first checks what it needs from macOS, App
-Management and Full Disk Access for the terminal, and stops naming each that
-is missing. It then asks for sudo once for its own steps, prints the
-manifest's `init_notes` when the machine has no chezmoi config, runs
+again at any point after. It opens with a banner of mycelium spreading and
+fruiting, in color unless `NO_COLOR` is set, then checks what it needs from
+macOS, App Management and Full Disk Access for the terminal, and stops naming
+each that is missing. It then asks for sudo once for its own steps, prints
+the manifest's `init_notes` when the machine has no chezmoi config, runs
 `chezmoi init`, and applies the files. Each chezmoi script, and each of
 `apply`'s steps, then runs as its own step, so one that fails stops none
-after it, with its output in
-`~/Library/Logs/macelium-bootstrap.log`. While a step runs, a status line
-shows its time so far and the download Homebrew is making, and gives way to
-any sudo password prompt. Homebrew discards sudo's credentials the first time
-it needs sudo, so each `brew bundle` step that installs a cask needing sudo
-asks to authenticate again, once. It ends with the plan, each step's result,
-and the manual steps. It needs a terminal.
+after it, with its output in `~/Library/Logs/macelium-bootstrap.log`. While a
+step runs, a status line shows its time so far and the download Homebrew is
+making, behind a growing mushroom, and gives way to any sudo password prompt.
+Homebrew discards sudo's credentials the first time it needs sudo, so each
+`brew bundle` step that installs a cask needing sudo asks to authenticate
+again, once. It ends with the plan, each step's result, and the manual steps.
+It needs a terminal.
 
 **`settings`** writes the macOS settings that differ from the list, the state
 repo's unless `--file` names another, without asking, and restarts the apps

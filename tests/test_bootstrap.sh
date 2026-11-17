@@ -38,6 +38,29 @@ test_bootstrap_skips_init_notes_with_a_chezmoi_config() {
   assert_not_contains "$out" "NOTES:"
 }
 
+# The banner.
+
+test_bootstrap_opens_with_the_banner() {
+  make_state macelium.conf $'contract 1\n'
+  run_tty -- "$tool" bootstrap "$state"
+  assert_order "$out" "________" "m a c e l i u m" "Checking what the bootstrap needs from macOS..."
+}
+
+test_banner_skips_a_narrow_terminal() {
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty_raw 1 /bin/bash -c 'stty cols 39; source "$1"; print_banner' _ "$tool"
+  assert_status 0
+  [[ ! -s $out ]] || fail "the banner drew on 39 columns"
+}
+
+test_banner_without_color_under_no_color() {
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner' _ "$tool"
+  assert_status 0
+  assert_contains "$out" "m a c e l i u m"
+  if grep -qE $'\033\\[[0-9;]*m' "$out"; then fail "a color escape under NO_COLOR"; fi
+}
+
 # What the bootstrap says before sudo asks.
 
 homebrew_asks_text='Homebrew will ask you to authenticate again'
@@ -168,10 +191,31 @@ test_logged_step_leaves_a_sudo_prompt_on_screen() {
   raw=$(cat "$out")
   after=${raw#*Password:}
   [[ $after != "$raw" ]] || fail "no Password: prompt"
-  [[ ${after%%$'\n'*} != *$'\033'* ]] || fail "the prompt's line was cleared"
+  # A spinner frame drawn between its sudo check and the prompt repaints only
+  # the frame's cells, so the line holds no clear.
+  [[ ${after%%$'\n'*} != *$'\033[K'* ]] || fail "the prompt's line was cleared"
   waited=${after%%answered*}
-  [[ $waited != *$'\033[K'* && $waited != *"... step,"* ]] || fail "the status was drawn while sudo waited"
+  [[ $waited != *$'\033[K'* && $waited != *" step,"* ]] || fail "the status was drawn while sudo waited"
   [[ $(grep -cF "$waiting_hint_text" "$out") == 1 ]] || fail "the waiting line is not shown once"
+}
+
+test_logged_step_stops_its_spinner_while_a_sudo_asks() {
+  mkdir -p "$sandbox/standin"
+  ln -s /bin/bash "$sandbox/standin/sudo"
+  # The sudo starts once the status is drawn, between the step's ticks.
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  logged_step_on_tty bash -c 'sleep 0.5; exec "$1" -c "printf Password: >/dev/tty; read -r _ </dev/tty; echo answered >/dev/tty"' \
+    _ "$sandbox/standin/sudo"
+  assert_status 0
+  local raw waited frames
+  raw=$(cat "$out")
+  [[ $raw == *$'\0337'*Password:* ]] || fail "no spinner frame before the prompt"
+  waited=${raw#*Password:}
+  waited=${waited%%answered*}
+  # One frame may fall between its sudo check and the prompt.
+  frames=${waited//$'\0337'/$'\001'}
+  frames=${frames//[!$'\001']/}
+  ((${#frames} <= 1)) || fail "the spinner turned ${#frames} times while the sudo asked"
 }
 
 test_logged_step_clears_the_status_after_a_sudo_that_never_prompted() {
@@ -204,8 +248,16 @@ test_logged_step_starts_each_output_line_on_a_clear_line() {
     ((count++))
   done
   ((count == 2)) || fail "expected 2 output lines, got $count"
-  [[ $raw == *"... step, 1 s"* ]] || fail "no status line was drawn"
+  [[ $raw == *" step, 1 s"* ]] || fail "no status line was drawn"
   assert_not_contains "$out" unfiltered
+}
+
+test_logged_step_turns_its_spinner_in_place() {
+  logged_step_on_tty sleep 1.5
+  assert_status 0
+  local raw
+  raw=$(cat "$out")
+  [[ $raw == *$'\0337\r  (T)\0338'* ]] || fail "no spinner frame was drawn in place"
 }
 
 test_logged_step_cuts_its_status_to_the_terminal_width() {
@@ -215,9 +267,10 @@ test_logged_step_cuts_its_status_to_the_terminal_width() {
   assert_status 0
   local raw shown
   raw=$(cat "$out")
-  [[ $raw == *"... a step with a long"* ]] || fail "no status line was drawn"
+  [[ $raw == *" a step with a long"* ]] || fail "no status line was drawn"
   shown=${raw#*$'\r\033[K'}
-  shown=${shown%%$'\r'*}
+  # A spinner frame starts by saving the cursor.
+  shown=${shown%%[$'\r\033']*}
   ((${#shown} == 30)) || fail "status is ${#shown} columns wide: $shown"
 }
 
