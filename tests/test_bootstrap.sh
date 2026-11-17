@@ -46,11 +46,21 @@ test_bootstrap_opens_with_the_banner() {
   assert_order "$out" "________" "m a c e l i u m" "Checking what the bootstrap needs from macOS..."
 }
 
-test_banner_skips_a_narrow_terminal() {
+test_banner_skips_a_terminal_too_narrow_or_short() {
+  local size
+  for size in 'rows 24 cols 63' 'rows 14 cols 80'; do
+    # shellcheck disable=SC2016 # expanded by the inner bash
+    run_tty_raw 1 /bin/bash -c 'stty $2; source "$1"; print_banner' _ "$tool" "$size"
+    assert_status 0
+    [[ ! -s $out ]] || fail "the banner drew with $size"
+  done
+}
+
+test_banner_keeps_an_exit_trap_set_before_it() {
   # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 1 /bin/bash -c 'stty cols 39; source "$1"; print_banner' _ "$tool"
+  run_tty_raw 1 /bin/bash -c 'source "$1"; trap "echo earlier trap ran" EXIT; print_banner' _ "$tool"
   assert_status 0
-  [[ ! -s $out ]] || fail "the banner drew on 39 columns"
+  assert_contains "$out" "earlier trap ran"
 }
 
 test_banner_without_color_under_no_color() {
@@ -257,7 +267,7 @@ test_logged_step_turns_its_spinner_in_place() {
   assert_status 0
   local raw
   raw=$(cat "$out")
-  [[ $raw == *$'\0337\r  (T)\0338'* ]] || fail "no spinner frame was drawn in place"
+  [[ $raw == *$'\0337\r  '???$'\0338'* ]] || fail "no spinner frame was drawn in place"
 }
 
 test_logged_step_cuts_its_status_to_the_terminal_width() {
@@ -271,7 +281,8 @@ test_logged_step_cuts_its_status_to_the_terminal_width() {
   shown=${raw#*$'\r\033[K'}
   # A spinner frame starts by saving the cursor.
   shown=${shown%%[$'\r\033']*}
-  ((${#shown} == 30)) || fail "status is ${#shown} columns wide: $shown"
+  # The row keeps room for sudo's Password: prompt.
+  ((${#shown} == 20)) || fail "status is ${#shown} columns wide: $shown"
 }
 
 test_logged_step_off_a_terminal_prints_plain_lines() {

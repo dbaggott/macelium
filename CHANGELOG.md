@@ -18,7 +18,7 @@ contract than its own.
 
 - `bootstrap` opens with a banner: mycelium spreads under a ground line, and
   mushrooms fruit above it. It is in color unless `NO_COLOR` is set, and a
-  terminal narrower than 40 columns skips it.
+  terminal smaller than 64 columns by 15 rows skips it.
 - The status line that `bootstrap` and `apply` show while a step runs leads
   with a growing mushroom in place of its `...`. The mushroom stops while sudo
   asks for a password, and never draws over the prompt.

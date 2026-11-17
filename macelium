@@ -1625,6 +1625,8 @@ spinner=('   ' ' . ' ' , ' ' o ' ' n ' '.n.' '(T)' '(T)' '(T)' '.T.' ' T ' ' t '
 # display loop (show_step), which no command prints.
 tick_marker=$'\x01macelium tick' frame_marker=$'\x01macelium frame' done_marker=$'\x01macelium done'
 waiting_hint='  ... waiting for input above (likely a password): type it and press Return'
+# The prompt sudo shows for a password on macOS.
+sudo_prompt='Password:'
 
 # Prints the name of the app running this shell, from the bundle identifier
 # macOS puts in its environment.
@@ -1856,7 +1858,7 @@ step_status() {
 # line: each write starts on a new one, and no status is drawn.
 show_step() {
   local name=$1 on_tty=$2 cache=$3 sizes=$4
-  local line status_line columns=80 n=0 frame=0 start=$SECONDS minutes=0 drawn=no waiting='' previous='' hinted=''
+  local line status_line columns=80 n=0 frame=0 frozen=no start=$SECONDS minutes=0 drawn=no waiting='' previous='' hinted=''
   step_tick
   while IFS= read -r line; do
     case $line in
@@ -1881,31 +1883,38 @@ process_tree() {
   ps -A -o pid=,ppid=,comm=
 }
 
-# Prints the terminal's width, or 80 when it has none. tput is no use in a
-# command substitution: it reads the width from stderr.
-terminal_columns() {
-  local size
+# Prints the terminal's rows and columns, each 24 and 80 when the terminal
+# has none. tput is no use in a command substitution: it reads the size from
+# stderr.
+terminal_size() {
+  local size rows cols
   size=$(stty size </dev/tty 2>/dev/null)
-  size=${size#* }
-  [[ $size =~ ^[0-9]+$ ]] && ((size > 0)) || size=80
-  echo "$size"
+  rows=${size% *} cols=${size#* }
+  [[ $rows =~ ^[0-9]+$ ]] && ((rows > 0)) || rows=24
+  [[ $cols =~ ^[0-9]+$ ]] && ((cols > 0)) || cols=80
+  echo "$rows $cols"
 }
 
 # show_step's draw, on its locals: prints the status at the cursor, the
-# spinner's frame in place of its "...", cut to the terminal's width, since
-# \033[K clears only the cursor's row.
+# spinner's frame in place of its "...", cut short of the terminal's width by
+# room for sudo's prompt, since \033[K clears only the cursor's row and the
+# spinner's frames redraw the start of it.
 step_draw() {
-  printf '%.*s' "$columns" "  ${spinner[frame % ${#spinner[@]}]}${status_line:5}"
-  drawn=yes
+  printf '%.*s' $((columns - ${#sudo_prompt} - 1)) "  ${spinner[frame % ${#spinner[@]}]}${status_line:5}"
+  drawn=yes frozen=no
 }
 
 # show_step's spinner frame, on its locals: draws the spinner's next frame
-# over the drawn status's, unless a sudo is asking. It saves and restores the
-# cursor around the frame, so a sudo prompt that began since the check stays
-# whole at the end of the line, with the cursor after it.
+# over the drawn status's. Once a sudo has asked, the frames stop until the
+# status is drawn again, since the cursor may have left its row. It saves
+# and restores the cursor around the frame, so a sudo prompt that began
+# since the check stays whole, on the status's row, with the cursor after it.
 step_frame() {
-  [[ $drawn == yes ]] || return 0
-  prompting_sudo "$(process_tree)" "$$" >/dev/null && return 0
+  [[ $drawn == yes && $frozen == no ]] || return 0
+  if prompting_sudo "$(process_tree)" "$$" >/dev/null; then
+    frozen=yes
+    return 0
+  fi
   ((frame++))
   printf '\0337\r  %s\0338' "${spinner[frame % ${#spinner[@]}]}"
 }
@@ -1926,7 +1935,8 @@ step_tick() {
       drawn=no
     fi
   elif [[ $on_tty == yes ]]; then
-    columns=$(terminal_columns)
+    columns=$(terminal_size)
+    columns=${columns#* }
     printf '\r\033[K'
     step_draw
   elif ((seconds / 60 > minutes)); then
@@ -2082,28 +2092,28 @@ banner_stages=(
 
 # Plays the banner on the terminal: mycelium spreads from a spore below a
 # ground line, then mushrooms fruit above it, and macelium's name follows. It
-# is up to 64 columns wide, in color unless NO_COLOR is set, and a terminal
-# narrower than 40 columns gets none.
+# is 64 columns by 15 rows, in color unless NO_COLOR is set, and a smaller
+# terminal gets none. Each frame redraws the last by moving up over it.
 print_banner() {
-  local width rows=12 ground=6 grid=() kind=() blank='' line='' drawn=no
+  local width=64 rows=12 ground=6 grid=() kind=() blank='' surface='' drawn=no
   local tip_r=() tip_c=() tip_d=() i r c d n nr nc ch dr alive step tick s
-  local site_col site_max site_delay
+  local site_col site_max site_delay size exit_trap
   local st_g='' st_h='' st_t='' st_s='' st_c='' st_d='' st_w='' st_0=''
-  width=$(terminal_columns)
-  ((width >= 40)) || return 0
-  ((width > 64)) && width=64
+  size=$(terminal_size)
+  ((${size% *} >= rows + 3 && ${size#* } >= width)) || return 0
   if [[ -z ${NO_COLOR:-} ]]; then
     st_g=$'\033[38;5;94m' st_h=$'\033[38;5;180m' st_t=$'\033[1;38;5;230m' st_s=$'\033[38;5;223m'
     st_c=$'\033[38;5;167m' st_d=$'\033[1;38;5;231m' st_w=$'\033[1;38;5;223m' st_0=$'\033[0m'
   fi
   for ((c = 0; c < width; c++)); do
-    blank+=' ' line+='_'
+    blank+=' ' surface+='_'
   done
   for ((r = 0; r < rows; r++)); do
     grid[r]=$blank kind[r]=$blank
   done
-  grid[ground]=$line kind[ground]=${line//_/g}
+  grid[ground]=$surface kind[ground]=${surface//_/g}
 
+  exit_trap=$(trap -p EXIT)
   printf '\033[?25l'
   trap 'printf "\033[?25h"' EXIT
 
@@ -2151,7 +2161,7 @@ print_banner() {
 
   # Each mushroom's column, the last stage it reaches, and the tick it
   # starts on, with a thread up to it from the mycelium.
-  site_col=($((width * 18 / 100)) $((width * 45 / 100)) $((width * 68 / 100)) $((width * 84 / 100)))
+  site_col=(11 28 43 53)
   site_max=(4 2 3 1)
   site_delay=(0 3 1 5)
   for c in "${site_col[@]}"; do
@@ -2174,9 +2184,9 @@ print_banner() {
     banner_frame 0.11
   done
 
-  printf '\n%*s%s%s%s\n' $(((width - 15) / 2)) '' "$st_w" 'm a c e l i u m' "$st_0"
+  printf '\n%24s%s%s%s\n' '' "$st_w" 'm a c e l i u m' "$st_0"
   printf '\033[?25h'
-  trap - EXIT
+  eval "${exit_trap:-trap - EXIT}"
 }
 
 # print_banner's put, on its locals: takes a row, a column, a character and
