@@ -53,14 +53,14 @@ run() {
 # arguments. Runs it on a terminal, setting status, and out to the file
 # holding what the terminal showed. The answers wait a second, since a
 # terminal that script has just opened drops what arrives before the command
-# starts. An answer that is $eof is sent with no newline, so it ends one
-# read: once the answers run out, only the first read gets end-of-file and
+# starts. An answer ending in $eof is sent with no newline, so the $eof ends
+# one read: once the answers run out, only the first read gets end-of-file and
 # any later one blocks, so a test of end-of-file sends one per read it expects,
 # and one more.
 run_tty() {
   local answers=''
   while [[ $1 != -- ]]; do
-    if [[ $1 == "$eof" ]]; then answers+=$1; else answers+=$1$'\n'; fi
+    if [[ $1 == *"$eof" ]]; then answers+=$1; else answers+=$1$'\n'; fi
     shift
   done
   shift

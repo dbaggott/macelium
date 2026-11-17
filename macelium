@@ -2398,8 +2398,9 @@ gitconfig_local_section=$'[include]\n\tpath = ~/.gitconfig.local'
 
 # Takes the question and its default, which may be empty. Asks on the
 # terminal, again while the reply and the default are both empty, and prints
-# the reply, or the default for an empty one. End-of-file gives what was
-# typed, else the default, and fails when there is neither.
+# the reply, or the default for an empty one. End-of-file on an empty reply
+# gives the default, and fails when there is none; after a partly typed
+# reply, it fails.
 ask_value() {
   local question=$1 answer
   [[ -n $2 ]] && question="$1 [$2]"
@@ -2408,7 +2409,8 @@ ask_value() {
     printf '%s: ' "$question" >/dev/tty
     if ! read -r answer </dev/tty; then
       printf '\n' >/dev/tty
-      [[ -n $answer || -n $2 ]] || return 1
+      [[ -z $answer && -n $2 ]] || return 1
+      answer=$2
     fi
     [[ -n $answer ]] || answer=$2
     if [[ -n $answer ]]; then

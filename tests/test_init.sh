@@ -319,6 +319,17 @@ test_init_end_of_file_with_no_default_stops_with_nothing_written() {
   assert_not_contains "$STUB_LOG" "brew"
 }
 
+test_init_end_of_file_after_a_partly_typed_name_stops_with_nothing_written() {
+  init_mac
+  git_user
+  # The first $eof hands bash the typed text, the second ends its read, then
+  # one more.
+  run_tty "Part$eof$eof" "$eof" -- "$tool" init "$repo"
+  assert_status 1
+  assert_contains "$out" "macelium init: no answer, so nothing was written"
+  [[ ! -e $repo ]] || fail "it wrote $repo"
+}
+
 test_ci_checks_step_has_a_timeout() {
   awk '/- name: Run the checks/ { step = 1; next } step && /- name:/ { exit } step && /timeout-minutes:/ { found = 1 } END { exit !found }' \
     "$(dirname "$tool")/.github/workflows/ci.yml" || fail "Run the checks has no timeout-minutes"

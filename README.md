@@ -328,8 +328,8 @@ It makes one commit, authored with the name and email it asked for, so a Mac
 with no git identity works, and adds no remote. It neither pushes nor
 bootstraps: push it to a new repo, then run `macelium bootstrap <path>`. With
 no terminal, or at end-of-file, a name or email takes its default, a capture
-or a move is declined, and a name or email with no default stops `init` with
-nothing written.
+or a move is declined, and a name or email with no default, or partly typed,
+stops `init` with nothing written.
 
 **`settings`** writes the macOS settings that differ from the list, the state
 repo's unless `--file` names another, without asking, and restarts the apps
