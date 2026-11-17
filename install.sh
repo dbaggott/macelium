@@ -12,6 +12,10 @@ install_macelium() {
   set -uo pipefail
   local usage='usage: curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh | bash -s <owner>/<repo>|<git URL> [<path>]'
 
+  lower() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+  }
+
   # Takes a git URL: https://, ssh:// or scp form, [user@]host:path. Sets
   # url_host, and url_path without its leading /, trailing / or .git, and
   # fails for anything else. A user name or a port is no part of either.
@@ -48,7 +52,7 @@ install_macelium() {
     return 1
   fi
   local github=no
-  if [[ $(printf '%s' "$host" | tr '[:upper:]' '[:lower:]') == github.com ]]; then
+  if [[ $(lower "$host") == github.com ]]; then
     github=yes
     if ! [[ $repo_path =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]; then
       echo "$usage" >&2
@@ -64,8 +68,7 @@ install_macelium() {
   names_state_repo() {
     parse_git_url "$1" || return 1
     if [[ $github == yes ]]; then
-      [[ $(printf '%s\n%s' "$url_host" "$url_path" | tr '[:upper:]' '[:lower:]') == \
-        "$(printf 'github.com\n%s' "$repo_path" | tr '[:upper:]' '[:lower:]')" ]]
+      [[ $(lower "$url_host") == github.com && $(lower "$url_path") == "$(lower "$repo_path")" ]]
     else
       [[ $url_host == "$host" && $url_path == "$repo_path" ]]
     fi
@@ -156,12 +159,12 @@ install_macelium() {
     else
       echo "==> Signing in to GitHub"
       gh auth login --hostname github.com --git-protocol https --web </dev/tty || {
-        echo "install.sh: stopped: gh auth login failed" >&2
+        echo "install.sh: gh auth login failed" >&2
         return 1
       }
     fi
     gh auth setup-git --hostname github.com || {
-      echo "install.sh: stopped: gh auth setup-git failed" >&2
+      echo "install.sh: gh auth setup-git failed" >&2
       return 1
     }
   }
@@ -176,8 +179,9 @@ install_macelium() {
   elif GIT_TERMINAL_PROMPT=0 git ls-remote "https://github.com/$repo_path" >/dev/null 2>&1; then
     echo "==> GitHub sign-in: not needed, git can read $name"
     offer_sign_in=yes
-  else
-    sign_in_to_github || return 1
+  elif ! sign_in_to_github; then
+    echo "install.sh: stopped: git can't read $name without a GitHub sign-in" >&2
+    return 1
   fi
 
   if [[ $cloned == yes ]]; then
@@ -194,12 +198,13 @@ install_macelium() {
   macelium bootstrap "$path" </dev/tty || return
 
   # The repo read without a sign-in, so pushing to it still needs one.
-  # End-of-file on the terminal, as when it has gone away, means no.
+  # End-of-file on the terminal, as when it has gone away, means no. The
+  # Mac is set up by now, so a failed sign-in is reported, not a failure.
   if [[ $offer_sign_in == yes ]] && ! gh auth status --hostname github.com >/dev/null 2>&1; then
     local answer
     printf '%s ' "Sign in to GitHub with gh, so you can push changes from this machine? [Y/n]" >/dev/tty
     if read -r answer </dev/tty && [[ -z $answer || $answer == [yY] || $answer == [yY][eE][sS] ]]; then
-      sign_in_to_github || return 1
+      sign_in_to_github || echo "==> GitHub sign-in: failed; run gh auth login and gh auth setup-git to push from this machine"
     else
       [[ -n ${answer:-} ]] || echo >/dev/tty
       echo "==> GitHub sign-in: skipped; run gh auth login and gh auth setup-git to push from this machine"

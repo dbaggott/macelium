@@ -82,7 +82,7 @@ jobs:
       # expect answers install.sh's prompts by their text: under script, only
       # the first read of the terminal gets end-of-file. It declines the
       # GitHub sign-in, which would open a browser. A prompt it doesn't know
-      # waits for the step's timeout.
+      # fails the run after five minutes with no output.
       - name: Install from the example with install.sh, then again
         timeout-minutes: 15
         env:
@@ -108,10 +108,11 @@ jobs:
 
           run_install() {
             /usr/bin/expect -c '
-              set timeout -1
+              set timeout 300
               spawn bash install.sh macelium-ci/example
               expect {
                 "so you can push changes from this machine?" { send "n\r"; exp_continue }
+                timeout { puts "\nexpect: no output for 300s, so a prompt it does not know is waiting"; exit 1 }
                 eof
               }
               exit [lindex [wait] 3]

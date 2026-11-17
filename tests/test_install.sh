@@ -81,7 +81,7 @@ test_install_installs_clones_and_bootstraps_then_resumes() {
   assert_status 0
   assert_contains "$STUB_LOG" "brew install dbaggott/tap/macelium"
   assert_contains "$out" "GitHub sign-in: not needed, git can read example/state"
-  assert_not_contains "$STUB_LOG" "gh auth login"
+  ! grep -v '^gh auth status ' "$STUB_LOG" | grep -q '^gh ' || fail "it called gh beyond auth status: $(cat "$STUB_LOG")"
   [[ -f $HOME/git/state/macelium.conf ]] || fail "not cloned to ~/git/state"
   assert_contains "$STUB_LOG" "macelium bootstrap $HOME/git/state tty=yes"
 
@@ -177,13 +177,13 @@ test_install_offers_a_github_sign_in_after_the_bootstrap_and_takes_end_of_file_a
   assert_not_contains "$STUB_LOG" "gh auth login"
 }
 
-test_install_signs_in_after_the_bootstrap_on_yes() {
+test_install_signs_in_after_the_bootstrap_on_yes_and_survives_its_failure() {
   installable_state
   run_tty y -- bash "$installer" example/state "$sandbox/clone"
   assert_order "$STUB_LOG" "macelium bootstrap" "gh auth login"
-  # The gh stub fails.
-  assert_status 1
-  assert_contains "$out" "install.sh: stopped: gh auth login failed"
+  # The gh stub fails, which the Mac, already set up, survives.
+  assert_status 0
+  assert_order "$out" "install.sh: gh auth login failed" "==> GitHub sign-in: failed"
 }
 
 test_install_signs_in_before_the_clone_when_github_refuses_an_anonymous_read() {
@@ -193,6 +193,7 @@ test_install_signs_in_before_the_clone_when_github_refuses_an_anonymous_read() {
   assert_status 1
   assert_contains "$out" "==> Signing in to GitHub"
   assert_contains "$STUB_LOG" "gh auth login"
+  assert_contains "$out" "install.sh: stopped: git can't read example/private without a GitHub sign-in"
   assert_not_contains "$out" "==> Cloning"
   assert_not_contains "$STUB_LOG" "macelium bootstrap"
 }
