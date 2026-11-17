@@ -32,13 +32,13 @@
 #
 # bootstrap sets up a machine from a checkout, the one named or else the one
 # chezmoi's config names, before anything is applied or again at any point
-# after. It first checks what it needs from macOS, App Management and Full
-# Disk Access for the terminal, and stops naming each that is missing. It then
-# asks for sudo once for its own steps (Homebrew asks again when a cask needs
-# sudo), runs chezmoi init and applies the files, then runs each chezmoi
-# script and each of apply's steps as its own step, so one that fails
-# stops none after it, with the output in its log. It ends with the plan, each
-# step's result, and the manual steps.
+# after. It opens with a banner, then checks what it needs from macOS, App
+# Management and Full Disk Access for the terminal, and stops naming each that
+# is missing. It then asks for sudo once for its own steps (Homebrew asks
+# again when a cask needs sudo), runs chezmoi init and applies the files, then
+# runs each chezmoi script and each of apply's steps as its own step, so one
+# that fails stops none after it, with the output in its log. It ends with the
+# plan, each step's result, and the manual steps.
 #
 # settings writes the macOS settings that differ from the list, the state
 # repo's unless --file names another, without asking, and restarts the apps
@@ -1616,10 +1616,17 @@ step_results=''
 step_log=''
 # Seconds between updates of a logged step's status.
 tick=5
-# The lines a logged step's ticker, and the end of its command, send its
+# Seconds between a logged step's spinner frames, on a terminal.
+frame_time=0.15
+# The spinner, a mushroom growing and fading, which takes the place of the
+# status's leading "..." on a terminal, at the same width.
+spinner=('   ' ' . ' ' , ' ' o ' ' n ' '.n.' '(T)' '(T)' '(T)' '.T.' ' T ' ' t ' ' . ')
+# The lines a logged step's tickers, and the end of its command, send its
 # display loop (show_step), which no command prints.
-tick_marker=$'\x01macelium tick' done_marker=$'\x01macelium done'
+tick_marker=$'\x01macelium tick' frame_marker=$'\x01macelium frame' done_marker=$'\x01macelium done'
 waiting_hint='  ... waiting for input above (likely a password): type it and press Return'
+# The prompt sudo shows for a password on macOS.
+sudo_prompt='Password:'
 
 # Prints the name of the app running this shell, from the bundle identifier
 # macOS puts in its environment.
@@ -1841,16 +1848,17 @@ step_status() {
 
 # Takes a logged step's name, whether its output goes to a terminal,
 # Homebrew's cache directory or none, and a file to keep the downloads' sizes
-# in. Reads the step's filtered output and the ticker's markers, and is the
+# in. Reads the step's filtered output and the tickers' markers, and is the
 # only writer to the screen until the done marker. On a terminal the status
-# is one line redrawn in place; elsewhere it is a line each minute.
+# is one line redrawn in place, led by the spinner; elsewhere it is a line
+# each minute.
 #
 # sudo writes its prompt with no newline, at the end of the status line, so
 # while a sudo below this macelium asks (prompting_sudo), nothing clears a
 # line: each write starts on a new one, and no status is drawn.
 show_step() {
   local name=$1 on_tty=$2 cache=$3 sizes=$4
-  local line status_line columns=80 n=0 start=$SECONDS minutes=0 drawn=no waiting='' previous='' hinted=''
+  local line status_line columns=80 n=0 frame=0 frozen=no start=$SECONDS minutes=0 drawn=no waiting='' previous='' hinted=''
   step_tick
   while IFS= read -r line; do
     case $line in
@@ -1858,6 +1866,7 @@ show_step() {
         ((n++))
         step_tick
         ;;
+      "$frame_marker") step_frame ;;
       "$done_marker") break ;;
       *)
         step_clear
@@ -1874,21 +1883,40 @@ process_tree() {
   ps -A -o pid=,ppid=,comm=
 }
 
-# Prints the terminal's width, or 80 when it has none. tput is no use in a
-# command substitution: it reads the width from stderr.
-terminal_columns() {
-  local size
+# Prints the terminal's rows and columns, each 24 and 80 when the terminal
+# has none. tput is no use in a command substitution: it reads the size from
+# stderr.
+terminal_size() {
+  local size rows cols
   size=$(stty size </dev/tty 2>/dev/null)
-  size=${size#* }
-  [[ $size =~ ^[0-9]+$ ]] && ((size > 0)) || size=80
-  echo "$size"
+  rows=${size% *} cols=${size#* }
+  [[ $rows =~ ^[0-9]+$ ]] && ((rows > 0)) || rows=24
+  [[ $cols =~ ^[0-9]+$ ]] && ((cols > 0)) || cols=80
+  echo "$rows $cols"
 }
 
-# show_step's draw, on its locals: prints the status at the cursor, cut to the
-# terminal's width, since \033[K clears only the cursor's row.
+# show_step's draw, on its locals: prints the status at the cursor, the
+# spinner's frame in place of its "...", cut short of the terminal's width by
+# room for sudo's prompt, since \033[K clears only the cursor's row and the
+# spinner's frames redraw the start of it.
 step_draw() {
-  printf '%.*s' "$columns" "$status_line"
-  drawn=yes
+  printf '%.*s' $((columns - ${#sudo_prompt} - 1)) "  ${spinner[frame % ${#spinner[@]}]}${status_line:5}"
+  drawn=yes frozen=no
+}
+
+# show_step's spinner frame, on its locals: draws the spinner's next frame
+# over the drawn status's. Once a sudo has asked, the frames stop until the
+# status is drawn again, since the cursor may have left its row. It saves
+# and restores the cursor around the frame, so a sudo prompt that began
+# since the check stays whole, on the status's row, with the cursor after it.
+step_frame() {
+  [[ $drawn == yes && $frozen == no ]] || return 0
+  if prompting_sudo "$(process_tree)" "$$" >/dev/null; then
+    frozen=yes
+    return 0
+  fi
+  ((frame++))
+  printf '\0337\r  %s\0338' "${spinner[frame % ${#spinner[@]}]}"
 }
 
 # show_step's tick, on its locals: updates the status and draws it, unless a
@@ -1907,7 +1935,8 @@ step_tick() {
       drawn=no
     fi
   elif [[ $on_tty == yes ]]; then
-    columns=$(terminal_columns)
+    columns=$(terminal_size)
+    columns=${columns#* }
     printf '\r\033[K'
     step_draw
   elif ((seconds / 60 > minutes)); then
@@ -1947,18 +1976,24 @@ run_logged_step() {
     cache=$(brew --cache 2>/dev/null)
   fi
   {
-    local ticker
+    local tickers=()
     while sleep "$tick"; do
       printf '%s\n' "$tick_marker"
     done &
-    ticker=$!
+    tickers+=($!)
+    if [[ $on_tty == yes ]]; then
+      while sleep "$frame_time"; do
+        printf '%s\n' "$frame_marker"
+      done &
+      tickers+=($!)
+    fi
     "$@" 2>&1 | tee -a "$step_log" "$out" |
       grep --line-buffered -E '^(Tapping|Installing|Upgrading) |has failed!$'
     echo "${PIPESTATUS[0]}" >"$out.status"
-    # The killed ticker's sleep holds the pipe open until it ends, so
+    # A killed ticker's sleep holds the pipe open until it ends, so
     # show_step stops at the done marker, not at the end of its input.
-    kill "$ticker" 2>/dev/null
-    wait "$ticker" 2>/dev/null
+    kill "${tickers[@]}" 2>/dev/null
+    wait "${tickers[@]}" 2>/dev/null
     printf '%s\n' "$done_marker"
   } | show_step "$name" "$on_tty" "$cache" "$out.sizes"
   # A pipeline that ended without writing its status didn't finish.
@@ -2044,6 +2079,165 @@ settings_step() {
   print_warnings
 }
 
+# The banner's mushrooms, each stage its rows, top first, split by ';', of
+# one odd width with the stem on the middle column. A space is transparent,
+# '|' is stem, 'o' a spot, and anything else cap.
+banner_stages=(
+  ','
+  'o;|'
+  ' .-. ;(___); | | '
+  '  .-~-.  ;(__o____);   | |   ;   | |   '
+  "   .-~~~~~-.   ; .'  o   o  '. ;(_____________);      | |      ;      | |      "
+)
+
+# Plays the banner on the terminal: mycelium spreads from a spore below a
+# ground line, then mushrooms fruit above it, and macelium's name follows. It
+# is 64 columns by 15 rows, in color unless NO_COLOR is set, and a smaller
+# terminal gets none. Each frame redraws the last by moving up over it.
+print_banner() {
+  local width=64 rows=12 ground=6 grid=() kind=() blank='' surface='' drawn=no
+  local tip_r=() tip_c=() tip_d=() i r c d n nr nc ch dr alive step tick s
+  local site_col site_max site_delay size exit_trap
+  local st_g='' st_h='' st_t='' st_s='' st_c='' st_d='' st_w='' st_0=''
+  size=$(terminal_size)
+  ((${size% *} >= rows + 3 && ${size#* } >= width)) || return 0
+  if [[ -z ${NO_COLOR:-} ]]; then
+    st_g=$'\033[38;5;94m' st_h=$'\033[38;5;180m' st_t=$'\033[1;38;5;230m' st_s=$'\033[38;5;223m'
+    st_c=$'\033[38;5;167m' st_d=$'\033[1;38;5;231m' st_w=$'\033[1;38;5;223m' st_0=$'\033[0m'
+  fi
+  for ((c = 0; c < width; c++)); do
+    blank+=' ' surface+='_'
+  done
+  for ((r = 0; r < rows; r++)); do
+    grid[r]=$blank kind[r]=$blank
+  done
+  grid[ground]=$surface kind[ground]=${surface//_/g}
+
+  exit_trap=$(trap -p EXIT)
+  printf '\033[?25l'
+  trap 'printf "\033[?25h"' EXIT
+
+  # Two tips grow from the spore, one each way, and branch. Only branches
+  # die early, so the mycelium always spans the width.
+  c=$((width / 2))
+  banner_put $((ground + 2)) "$c" '@' t
+  tip_r=($((ground + 2)) $((ground + 2))) tip_c=("$c" "$c") tip_d=(-1 1)
+  banner_frame 0.05
+  for ((step = 0; step < width; step++)); do
+    n=${#tip_r[@]} alive=0
+    for ((i = 0; i < n; i++)); do
+      r=${tip_r[i]} c=${tip_c[i]} d=${tip_d[i]}
+      ((d != 0)) || continue
+      [[ ${kind[r]:c:1} != t ]] || banner_put "$r" "$c" "${grid[r]:c:1}" h
+      dr=$((RANDOM % 10))
+      if ((dr < 2)); then dr=-1; elif ((dr > 7)); then dr=1; else dr=0; fi
+      nr=$((r + dr)) nc=$((c + d))
+      if ((nr <= ground || nr >= rows)); then
+        dr=0 nr=$r
+      fi
+      if ((nc < 0 || nc >= width || (i > 1 && RANDOM % 25 == 0))); then
+        tip_d[i]=0
+        continue
+      fi
+      if ((dr < 0)); then
+        ch="'"
+      elif ((dr > 0)); then
+        ch=','
+      else
+        case $((RANDOM % 4)) in 0) ch='~' ;; 1) ch='.' ;; *) ch='-' ;; esac
+      fi
+      banner_put "$nr" "$nc" "$ch" t
+      tip_r[i]=$nr tip_c[i]=$nc alive=1
+      if ((${#tip_r[@]} < 14 && RANDOM % 6 == 0)); then
+        tip_r+=("$nr") tip_c+=("$nc") tip_d+=("$d")
+      fi
+    done
+    ((alive)) || break
+    banner_frame 0.015
+  done
+  for ((r = ground + 1; r < rows; r++)); do
+    kind[r]=${kind[r]//t/h}
+  done
+
+  # Each mushroom's column, the last stage it reaches, and the tick it
+  # starts on, with a thread up to it from the mycelium.
+  site_col=(11 28 43 53)
+  site_max=(4 2 3 1)
+  site_delay=(0 3 1 5)
+  for c in "${site_col[@]}"; do
+    for ((r = ground + 1; r < rows; r++)); do
+      [[ ${kind[r]:c:1} != h ]] || break
+      banner_put "$r" "$c" '|' h
+    done
+  done
+  banner_frame 0.08
+  for ((tick = 0; tick < 10; tick++)); do
+    for ((r = 0; r < ground; r++)); do
+      grid[r]=$blank kind[r]=$blank
+    done
+    for ((i = 0; i < ${#site_col[@]}; i++)); do
+      s=$((tick - site_delay[i]))
+      ((s >= 0)) || continue
+      ((s <= site_max[i])) || s=${site_max[i]}
+      banner_mushroom "${site_col[i]}" "${banner_stages[s]}"
+    done
+    banner_frame 0.11
+  done
+
+  printf '\n%24s%s%s%s\n' '' "$st_w" 'm a c e l i u m' "$st_0"
+  printf '\033[?25h'
+  eval "${exit_trap:-trap - EXIT}"
+}
+
+# print_banner's put, on its locals: takes a row, a column, a character and
+# its class, and sets that cell when it is on the grid.
+banner_put() {
+  (($1 >= 0 && $1 < rows && $2 >= 0 && $2 < width)) || return 0
+  grid[$1]="${grid[$1]:0:$2}$3${grid[$1]:$2+1}"
+  kind[$1]="${kind[$1]:0:$2}$4${kind[$1]:$2+1}"
+}
+
+# print_banner's mushroom, on its locals: takes a column and a stage, and
+# draws the stage standing on the ground line, its stem on that column.
+banner_mushroom() {
+  local col=$1 stage=() top left i j row ch k
+  IFS=';' read -r -a stage <<<"$2"
+  top=$((ground - ${#stage[@]}))
+  left=$((col - ${#stage[0]} / 2))
+  for ((i = 0; i < ${#stage[@]}; i++)); do
+    row=${stage[i]}
+    for ((j = 0; j < ${#row}; j++)); do
+      ch=${row:j:1}
+      case $ch in ' ') continue ;; '|') k=s ;; o) k=d ;; *) k=c ;; esac
+      banner_put $((top + i)) $((left + j)) "$ch" "$k"
+    done
+  done
+}
+
+# print_banner's frame, on its locals: takes seconds to wait after it, and
+# draws the grid over the last frame, each class in its color.
+banner_frame() {
+  local r c k prev out
+  [[ $drawn == no ]] || printf '\033[%dA' "$rows"
+  for ((r = 0; r < rows; r++)); do
+    out='' prev=''
+    for ((c = 0; c < width; c++)); do
+      k=${kind[r]:c:1}
+      if [[ $k != "$prev" ]]; then
+        case $k in
+          g) out+=$st_g ;; h) out+=$st_h ;; t) out+=$st_t ;; s) out+=$st_s ;;
+          c) out+=$st_c ;; d) out+=$st_d ;; *) out+=$st_0 ;;
+        esac
+        prev=$k
+      fi
+      out+=${grid[r]:c:1}
+    done
+    printf '\r%s%s\033[K\n' "$out" "$st_0"
+  done
+  drawn=yes
+  sleep "$1"
+}
+
 # Takes the checkout to set up from, or none for the one chezmoi's config
 # names.
 bootstrap() {
@@ -2051,6 +2245,7 @@ bootstrap() {
     echo "macelium bootstrap: needs a terminal for its prompts" >&2
     return 1
   fi
+  print_banner
   if ! command -v brew >/dev/null; then
     local prefix
     for prefix in /opt/homebrew /usr/local; do

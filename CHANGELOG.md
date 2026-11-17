@@ -30,6 +30,15 @@ contract than its own.
 - Each release attaches `install.sh`, and the README's command fetches it
   from the latest release rather than `main`.
 
+## 0.2.5
+
+- `bootstrap` opens with a banner: mycelium spreads under a ground line, and
+  mushrooms fruit above it. It is in color unless `NO_COLOR` is set, and a
+  terminal smaller than 64 columns by 15 rows skips it.
+- The status line that `bootstrap` and `apply` show while a step runs leads
+  with a growing mushroom in place of its `...`. The mushroom stops while sudo
+  asks for a password, and never draws over the prompt.
+
 ## 0.2.4
 
 - `apply` shows `bootstrap`'s status line while it runs `brew bundle` or
