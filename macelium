@@ -2087,7 +2087,7 @@ banner_stages=(
   'o;|'
   ' .-. ;(___); | | '
   '  .-~-.  ;(__o____);   | |   ;   | |   '
-  "   .-~~~~~-.   ; .'  o   o  '. ;(_____________);      | |      ;      | |      "
+  "   .-~~~~~-.   ; .'      o  '. ;(__o__________);      | |      ;      | |      "
 )
 
 # Plays the banner on the terminal: a spore drifts down onto a ground line,
