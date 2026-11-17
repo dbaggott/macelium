@@ -21,12 +21,14 @@
 #
 # apply prints the plan, asks, then runs chezmoi apply, brew bundle over both
 # Brewfiles and mise install, upgrading only when the plan showed upgrades,
-# then writes the macOS settings that still differ, and runs the apps' hooks,
-# each when the plan listed it. When a check failed, the plan is partial and
-# apply stops without asking. It never removes anything: a package installed
-# but not listed stays until it is listed or uninstalled by hand. When the
-# plan lists macelium itself to upgrade, apply upgrades it before any other
-# step and hands over to the new version's apply, which plans and asks again.
+# showing a status line while brew bundle and mise install run, with their
+# output in ~/Library/Logs/macelium-apply.log, then writes the macOS settings
+# that still differ, and runs the apps' hooks, each when the plan listed it.
+# When a check failed, the plan is partial and apply stops without asking. It
+# never removes anything: a package installed but not listed stays until it is
+# listed or uninstalled by hand. When the plan lists macelium itself to
+# upgrade, apply upgrades it before any other step and hands over to the new
+# version's apply, which plans and asks again.
 #
 # bootstrap sets up a machine from a checkout, the one named or else the one
 # chezmoi's config names, before anything is applied or again at any point
@@ -52,7 +54,7 @@
 set -uo pipefail
 
 # A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.2.3"
+VERSION="0.2.4"
 # How brew bundle check names macelium in a state repo's Brewfile, whose line
 # for it README.md ("The Brewfile's macelium line") gives.
 self_formula=dbaggott/tap/macelium
@@ -1444,11 +1446,21 @@ confirm() {
   esac
 }
 
+apply_log="$HOME/Library/Logs/macelium-apply.log"
+
 # Prints the command, then runs it.
 run_step() {
   printf '\n==> %s\n' "$*"
   "$@" && return 0
   stop_apply "$* failed"
+  return 1
+}
+
+# Takes a step's name and its command. Runs it as a logged step, stopping
+# apply when it fails.
+run_apply_logged_step() {
+  run_logged_step "$@" && return 0
+  stop_apply "$1 failed"
   return 1
 }
 
@@ -1535,13 +1547,15 @@ apply() {
   # script that runs brew bundle included.
   ((upgrades > 0)) || export HOMEBREW_BUNDLE_NO_UPGRADE=1
   run_step chezmoi apply --force || return 1
+  step_log=$apply_log
+  mkdir -p "$(dirname "$step_log")"
   if [[ -e $state_brewfile ]]; then
-    run_step brew bundle --file="$state_brewfile" || return 1
+    run_apply_logged_step "brew bundle" brew bundle --file="$state_brewfile" || return 1
     if [[ -f $local_brewfile ]]; then
-      run_step brew bundle --file="$local_brewfile" || return 1
+      run_apply_logged_step "brew bundle (this machine)" brew bundle --file="$local_brewfile" || return 1
     fi
   fi
-  run_step mise -C "$HOME" install || return 1
+  run_apply_logged_step "mise install" mise -C "$HOME" install || return 1
   if [[ -n $macos_items ]]; then
     printf '\n==> %s\n' "macOS settings"
     if ! write_settings when-writing; then
@@ -1598,6 +1612,8 @@ rerun=''
 # Set by record_step: each step and how it ended, tab-separated, a line each.
 step_results=''
 
+# The log a logged step's output goes to, which its caller sets.
+step_log=''
 # Seconds between updates of a logged step's status.
 tick=5
 # The lines a logged step's ticker, and the end of its command, send its
@@ -1830,7 +1846,7 @@ step_status() {
 # is one line redrawn in place; elsewhere it is a line each minute.
 #
 # sudo writes its prompt with no newline, at the end of the status line, so
-# while a sudo below the bootstrap asks (prompting_sudo), nothing clears a
+# while a sudo below this macelium asks (prompting_sudo), nothing clears a
 # line: each write starts on a new one, and no status is drawn.
 show_step() {
   local name=$1 on_tty=$2 cache=$3 sizes=$4
@@ -1853,7 +1869,7 @@ show_step() {
   step_clear
 }
 
-# Prints the bootstrap's processes, for prompting_sudo.
+# Prints every process, for prompting_sudo.
 process_tree() {
   ps -A -o pid=,ppid=,comm=
 }
@@ -1923,8 +1939,8 @@ step_clear() {
 run_logged_step() {
   local name=$1 out status on_tty=no cache=''
   shift
-  printf '\n==> %s (output in %s)\n' "$name" "$bootstrap_log"
-  printf '\n==> %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*" >>"$bootstrap_log"
+  printf '\n==> %s (output in %s)\n' "$name" "$step_log"
+  printf '\n==> %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*" >>"$step_log"
   out=$(mktemp)
   [[ -t 1 ]] && on_tty=yes
   if [[ $1 == brew ]]; then
@@ -1936,7 +1952,7 @@ run_logged_step() {
       printf '%s\n' "$tick_marker"
     done &
     ticker=$!
-    "$@" 2>&1 | tee -a "$bootstrap_log" "$out" |
+    "$@" 2>&1 | tee -a "$step_log" "$out" |
       grep --line-buffered -E '^(Tapping|Installing|Upgrading) |has failed!$'
     echo "${PIPESTATUS[0]}" >"$out.status"
     # The killed ticker's sleep holds the pipe open until it ends, so
@@ -2074,7 +2090,8 @@ bootstrap() {
     echo "macelium bootstrap: stopped: sudo failed" >&2
     return 1
   }
-  mkdir -p "$(dirname "$bootstrap_log")"
+  step_log=$bootstrap_log
+  mkdir -p "$(dirname "$step_log")"
 
   print_init_notes
   run_terminal_step "chezmoi init" chezmoi init --source "$repo" || {

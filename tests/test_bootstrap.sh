@@ -74,7 +74,7 @@ source_macelium() {
   source "$tool"
   export STUB_BREW_CACHE=$sandbox/cache
   mkdir -p "$STUB_BREW_CACHE/downloads"
-  bootstrap_log=$sandbox/bootstrap.log
+  step_log=$sandbox/bootstrap.log
   sizes=$sandbox/sizes
 }
 
@@ -152,7 +152,7 @@ test_prompting_sudo_ignores_a_sudo_with_a_child_or_outside_the_root() {
 # tick of a second, keeping what the terminal showed as raw bytes.
 logged_step_on_tty() {
   # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 4 /bin/bash -c 'source "$1"; shift; tick=1 bootstrap_log=$HOME/bootstrap.log; run_logged_step step "$@"' \
+  run_tty_raw 4 /bin/bash -c 'source "$1"; shift; tick=1 step_log=$HOME/bootstrap.log; run_logged_step step "$@"' \
     _ "$tool" "$@"
 }
 
@@ -210,7 +210,7 @@ test_logged_step_starts_each_output_line_on_a_clear_line() {
 
 test_logged_step_cuts_its_status_to_the_terminal_width() {
   # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 3 /bin/bash -c 'stty cols 30; source "$1"; tick=1 bootstrap_log=$HOME/bootstrap.log; run_logged_step "a step with a long name" sleep 1.5' \
+  run_tty_raw 3 /bin/bash -c 'stty cols 30; source "$1"; tick=1 step_log=$HOME/bootstrap.log; run_logged_step "a step with a long name" sleep 1.5' \
     _ "$tool"
   assert_status 0
   local raw shown
@@ -226,7 +226,7 @@ test_logged_step_off_a_terminal_prints_plain_lines() {
   run_logged_step "brew bundle" brew bundle >"$sandbox/out" 2>&1
   out=$sandbox/out
   [[ $(cat "$out") != *[$'\r\033']* ]] || fail "a \\r or escape in the output"
-  assert_contains "$out" "==> brew bundle (output in $bootstrap_log)"
+  assert_contains "$out" "==> brew bundle (output in $step_log)"
   assert_contains "$STUB_LOG" "brew --cache"
   [[ $step_results == $'brew bundle\tok\n' ]] || fail "results: $step_results"
 }
