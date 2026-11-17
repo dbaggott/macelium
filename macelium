@@ -61,7 +61,7 @@
 set -uo pipefail
 
 # A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.3.0"
+VERSION="0.4.0"
 # How brew bundle check names macelium in a state repo's Brewfile, whose line
 # for it README.md ("The Brewfile's macelium line") gives.
 self_formula=dbaggott/tap/macelium
@@ -2432,14 +2432,14 @@ secret_lines() {
   } | cut -d : -f 1 | sort -nu
 }
 
-# Takes kept or moved, the numbers of the lines to move, a line each, 1 when
+# Takes kept or moved, the numbers of the lines to move, one a line, 1 when
 # the file is a gitconfig, and the file. Prints the file without those lines,
 # or those lines alone. In a gitconfig, a moved line comes with its section's
 # header, and a moved header takes its whole section with it.
 split_lines() {
-  awk -v want="$1" -v numbers="$2" -v sections="$3" '
+  awk -v want="$1" -v numbers="${2//$'\n'/,}" -v sections="$3" '
     BEGIN {
-      n = split(numbers, list, "\n")
+      n = split(numbers, list, ",")
       for (i = 1; i <= n; i++) if (list[i] != "") move[list[i]] = 1
     }
     {
@@ -2459,14 +2459,15 @@ split_lines() {
 # name and email read the state repo's values, any {{ in it stays literal,
 # and it ends with the section that includes ~/.gitconfig.local.
 gitconfig_template() {
-  awk -v last="$gitconfig_local_section" '
+  awk '
     { gsub(/[{][{]/, "{{ \"{{\" }}") }
     /^[[:space:]]*\[/ { user = (tolower($0) ~ /^[[:space:]]*\[user\][[:space:]]*$/); print; next }
     user && match(tolower($0), /^[[:space:]]*name[[:space:]]*=/) { print substr($0, 1, RLENGTH) " {{ .name }}"; next }
     user && match(tolower($0), /^[[:space:]]*email[[:space:]]*=/) { print substr($0, 1, RLENGTH) " {{ .email }}"; next }
     { print }
-    END { if (NR) print ""; print last }
+    END { if (NR) print "" }
   '
+  printf '%s\n' "$gitconfig_local_section"
 }
 
 # Takes the file's path under the home directory, whether the state repo is

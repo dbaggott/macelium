@@ -3,6 +3,9 @@
 # macelium in it, and assertions. An assertion that fails prints why and
 # exits the test's subshell.
 
+# The terminal's end-of-file character, ^D, as an answer to run_tty.
+eof=$'\x04'
+
 tool=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/macelium
 
 # A temporary home, the stubs first on PATH, and an empty call log.
@@ -15,7 +18,7 @@ setup_sandbox() {
   cp "$(dirname "$tool")"/tests/stubs/* "$sandbox/bin/"
   export PATH=$sandbox/bin:$PATH
   unset XDG_CONFIG_HOME STUB_SOURCE_PATH STUB_CHEZMOI_STATUS STUB_CHEZMOI_MANAGED STUB_CHEZMOI_APPLY_READS STUB_BREW_UNLISTED STUB_BREW_OUTDATED \
-    STUB_BREW_UPGRADE_FAILS STUB_BREW_BUNDLE_OUTPUT STUB_BREW_BUNDLE_FAILS STUB_BREW_PREFIX STUB_BREW_CACHE STUB_SUDO_ASKS MACELIUM_UPGRADED_FROM
+    STUB_BREW_UPGRADE_FAILS STUB_BREW_BUNDLE_OUTPUT STUB_BREW_BUNDLE_FAILS STUB_BREW_PREFIX STUB_BREW_CACHE STUB_BREW_DUMP STUB_SUDO_ASKS GIT_CONFIG_GLOBAL MACELIUM_UPGRADED_FROM
   : >"$STUB_LOG"
 }
 
@@ -50,19 +53,22 @@ run() {
 # arguments. Runs it on a terminal, setting status, and out to the file
 # holding what the terminal showed. The answers wait a second, since a
 # terminal that script has just opened drops what arrives before the command
-# starts.
+# starts. An answer that is $eof is sent with no newline, so it ends one
+# read: once the answers run out, only the first read gets end-of-file and
+# any later one blocks, so a test of end-of-file sends one per read it expects,
+# and one more.
 run_tty() {
-  local answers=()
+  local answers=''
   while [[ $1 != -- ]]; do
-    answers+=("$1")
+    if [[ $1 == "$eof" ]]; then answers+=$1; else answers+=$1$'\n'; fi
     shift
   done
   shift
   out=$sandbox/out err=$sandbox/out
   {
-    if ((${#answers[@]})); then
+    if [[ -n $answers ]]; then
       sleep 1
-      printf '%s\n' "${answers[@]}"
+      printf '%s' "$answers"
     fi
     sleep 1
   } | script -q /dev/null "$@" | tr -d '\r' >"$out"

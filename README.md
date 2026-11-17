@@ -9,6 +9,7 @@ shape of terraform's plan and apply:
 - `macelium plan` prints every difference, and changes nothing.
 - `macelium apply` prints the plan, asks, and then brings the machine in line.
 - `macelium bootstrap` sets up a new machine from a checkout.
+- `macelium init` captures a Mac into a new state repo.
 - A daily `macelium plan --notify`, the Homebrew formula's service, posts a
   notification when the machine has drifted.
 
@@ -82,6 +83,47 @@ The state repo's config template writes it:
 ```
 sourceDir = {{ .chezmoi.workingTree | quote }}
 ```
+
+`.chezmoi.workingTree` is the checkout that `chezmoi init --source` names.
+Run `chezmoi init --source` on a git worktree of the state repo, and the
+config names the worktree, so chezmoi, and with it macelium, then reads the
+worktree in place of the checkout. Run `chezmoi init --source <checkout>`
+again to go back.
+
+### Person values and machine differences
+
+What every machine shares and what one machine needs differently go in
+different places, and secrets in neither:
+
+- **Values every machine shares**, such as your name and email, go in
+  `home/.chezmoidata.toml`, which templates read: a `dot_gitconfig.tmpl` can
+  write `name = {{ .name }}`. `macelium init` writes `name` and `email`
+  there.
+- **One machine's differences**, such as a work email or work shell setup, go
+  in `~/.gitconfig.local` and `~/.zshrc.local`. They are not in the state
+  repo, and the managed files include them when present: `~/.gitconfig` ends
+  with
+
+  ```
+  [include]
+  	path = ~/.gitconfig.local
+  ```
+
+  and `~/.zshrc` with
+
+  ```sh
+  [[ -r ~/.zshrc.local ]] && source ~/.zshrc.local
+  ```
+
+  `macelium init` adds both when it captures those files.
+- **Secrets never enter the state repo**, private or not: a private repo is
+  still copied to every machine, to its host and to backups, and a setting
+  makes it public. Resolve a secret when it is used, from a password manager
+  or the Keychain, read by the command that needs it. Failing that, export it
+  from `~/.zshrc.local`, mode `0600`, though there it is plain text in every
+  shell's environment. A chezmoi template must not read a secret: the daily
+  `plan --notify` renders the templates from a background service, where a
+  password manager's or the Keychain's prompt blocks or fails.
 
 ### The Brewfile's macelium line
 
@@ -176,6 +218,7 @@ Each `apps/<app>/` can hold:
 ## Commands
 
 ```
+macelium init [--public] <path>
 macelium bootstrap [<checkout>]
 macelium plan [--notify]
 macelium apply
@@ -249,6 +292,43 @@ Homebrew discards sudo's credentials the first time it needs sudo, so each
 `brew bundle` step that installs a cask needing sudo asks to authenticate
 again, once. It ends with the plan, each step's result, and the manual steps.
 It needs a terminal.
+
+**`init`** captures this Mac into a new state repo at `<path>`, which must
+be missing or an empty directory: otherwise it exits 1, having written
+nothing. It writes [`example/`](example/)'s layout, at the contract this
+macelium knows:
+
+- `macelium.conf`, `.chezmoiroot` naming `home`, a `macos.sh` holding only a comment, and
+  `home/.chezmoi.toml.tmpl` writing `sourceDir`
+- a `Brewfile` from `brew bundle dump --formula --cask --tap`, with
+  macelium's line as above
+- `home/.chezmoidata.toml` with your `name` and `email`. It asks for each,
+  defaulting to `git config --global`, else, when `gh` is signed in, to
+  your GitHub name and `<id>+<login>@users.noreply.github.com`.
+
+Then, for each of `~/.gitconfig`, `~/.zshrc` and
+`~/.config/mise/config.toml` that exists, it shows the file and asks whether
+to capture it. The question says the file will be published if the repo is
+public, or, with `--public`, that it will be. A captured `~/.gitconfig`
+becomes `dot_gitconfig.tmpl`, its `[user]` name and email read from
+`.chezmoidata.toml`, and both it and `~/.zshrc` gain the include of their
+`.local` file (above). In those two, it lists the lines that look like
+secrets: an `export` of a name holding `TOKEN`, `SECRET`, `KEY` or
+`PASSWORD`; a value starting `ghp_`, `github_pat_`, `sk-`, `AKIA` or `xox`;
+a URL with a password; a `.gitconfig` `extraHeader`. It offers to move them
+to `~/.gitconfig.local` or `~/.zshrc.local`, created mode `0600`, which leaves
+them out of the state repo. A moved `.gitconfig` line takes its section's
+header with it, and a moved header its whole section. `init` changes only the
+state repo and the `.local` files, never `~/.gitconfig` or `~/.zshrc`
+themselves: they gain the includes when `bootstrap` applies the captured
+copies.
+
+It makes one commit, authored with the name and email it asked for, so a Mac
+with no git identity works, and adds no remote. It neither pushes nor
+bootstraps: push it to a new repo, then run `macelium bootstrap <path>`. With
+no terminal, or at end-of-file, a name or email takes its default, a capture
+or a move is declined, and a name or email with no default stops `init` with
+nothing written.
 
 **`settings`** writes the macOS settings that differ from the list, the state
 repo's unless `--file` names another, without asking, and restarts the apps

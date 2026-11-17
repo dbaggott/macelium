@@ -14,6 +14,19 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.4.0
+
+- `macelium init [--public] <path>` captures this Mac into a new state repo:
+  `example/`'s layout, a Brewfile from `brew bundle dump`, your name and
+  email in `home/.chezmoidata.toml`, and, each on a yes, `~/.gitconfig`,
+  `~/.zshrc` and the mise config. It offers to move the lines that look like
+  secrets to `~/.gitconfig.local` and `~/.zshrc.local`, and makes one
+  commit, with no remote.
+- The README says where values every machine shares, one machine's
+  differences, and secrets go, and warns that `chezmoi init --source` on a
+  worktree points macelium at the worktree.
+- `example/`'s greeting is a template reading `home/.chezmoidata.toml`.
+
 ## 0.3.0
 
 - `install.sh` takes a git URL on any host, `https://`, `ssh://` or

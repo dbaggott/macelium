@@ -65,6 +65,9 @@ jobs:
 
           script -q /dev/null "$GITHUB_WORKSPACE/macelium" bootstrap "$state" </dev/null
 
+          # The greeting is a template reading home/.chezmoidata.toml.
+          [[ $(cat ~/.config/macelium-example/greeting) == "hello from the macelium example" ]]
+
           # plan exits 2 here: the runner has Homebrew packages the example
           # does not list. Only 1, a failed check, fails the job.
           status=0
