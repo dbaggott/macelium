@@ -2,9 +2,9 @@
 # Records the call, reading any Brewfile on stdin. `bundle cleanup` lists $STUB_BREW_UNLISTED, a formula a
 # line, as installed but not listed; `bundle check` without --no-upgrade lists $STUB_BREW_OUTDATED, an entry
 # a line as brew bundle check names it ("Formula <name>"), as having an upgrade; every other check finds
-# nothing. Any other `bundle`, such as `bundle --file=<path>`, prints $STUB_BREW_BUNDLE_OUTPUT, and then fails
-# when $STUB_BREW_BUNDLE_FAILS is set. `upgrade` fails when $STUB_BREW_UPGRADE_FAILS is set, `--prefix` prints $STUB_BREW_PREFIX, and
-# `--cache` prints $STUB_BREW_CACHE.
+# nothing. Any other `bundle`, such as `bundle --file=<path>`, prints $STUB_BREW_BUNDLE_OUTPUT, then fails
+# when $STUB_BREW_BUNDLE_FAILS is set. `upgrade` fails when $STUB_BREW_UPGRADE_FAILS is set, `--prefix`
+# prints $STUB_BREW_PREFIX, and `--cache` prints $STUB_BREW_CACHE.
 echo "brew $*" >>"$STUB_LOG"
 for arg in "$@"; do
   if [[ $arg == --file=- ]]; then cat >/dev/null; fi

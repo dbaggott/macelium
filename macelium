@@ -22,12 +22,13 @@
 # apply prints the plan, asks, then runs chezmoi apply, brew bundle over both
 # Brewfiles and mise install, upgrading only when the plan showed upgrades,
 # showing a status line while each of those three runs with its output in
-# ~/Library/Logs/macelium-apply.log, then writes the macOS settings that still differ, and runs the apps' hooks,
-# each when the plan listed it. When a check failed, the plan is partial and
-# apply stops without asking. It never removes anything: a package installed
-# but not listed stays until it is listed or uninstalled by hand. When the
-# plan lists macelium itself to upgrade, apply upgrades it before any other
-# step and hands over to the new version's apply, which plans and asks again.
+# ~/Library/Logs/macelium-apply.log, then writes the macOS settings that still
+# differ, and runs the apps' hooks, each when the plan listed it. When a check
+# failed, the plan is partial and apply stops without asking. It never removes
+# anything: a package installed but not listed stays until it is listed or
+# uninstalled by hand. When the plan lists macelium itself to upgrade, apply
+# upgrades it before any other step and hands over to the new version's apply,
+# which plans and asks again.
 #
 # bootstrap sets up a machine from a checkout, the one named or else the one
 # chezmoi's config names, before anything is applied or again at any point
