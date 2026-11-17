@@ -2117,23 +2117,25 @@ print_banner() {
   printf '\033[?25l'
   trap 'printf "\033[?25h"' EXIT
 
-  # The spore drifts down near the middle and settles on the ground line,
-  # then roots through it.
+  # The spore drifts down near the middle, settles on the ground line, and
+  # sinks through it into the soil.
   c=$((width / 2 - 6 + RANDOM % 13))
   for ((r = 0; r < ground; r++)); do
-    banner_put "$r" "$c" '*' t
+    banner_put "$r" "$c" '*' h
     banner_frame 0.14
-    ((r < ground - 1)) || break
     banner_put "$r" "$c" ' ' ' '
-    c=$((c + RANDOM % 3 - 1))
+    ((r == ground - 1)) || c=$((c + RANDOM % 3 - 1))
   done
+  banner_put "$r" "$c" '*' h
   banner_frame 0.3
+  banner_put "$r" "$c" '_' g
   for ((r = ground + 1; r <= ground + 2; r++)); do
-    banner_put "$r" "$c" '|' t
-    banner_frame 0.12
+    banner_put "$r" "$c" '*' h
+    banner_frame 0.14
+    ((r == ground + 2)) || banner_put "$r" "$c" ' ' ' '
   done
 
-  # Two tips grow from the root, one each way, and branch. Only branches
+  # Two tips grow from the spore, one each way, and branch. Only branches
   # die early, so the mycelium always spans the width.
   tip_r=($((ground + 2)) $((ground + 2))) tip_c=("$c" "$c") tip_d=(-1 1)
   for ((step = 0; step < width; step++)); do
