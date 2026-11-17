@@ -161,6 +161,30 @@ test_init_gitconfig_template_renders_as_the_original() {
     fail "rendered: $rendered"
 }
 
+test_init_keeps_a_gitconfig_include_that_is_already_last() {
+  init_mac
+  home_file .gitconfig $'[core]\n\teditor = vim\n[include]\n\tpath = ~/.gitconfig.local\n'
+  home_file .gitconfig.local $'[user]\n\tname = Local Name\n\temail = local@example.com\n'
+  run_tty '' '' y -- "$tool" init "$repo"
+  assert_status 0
+  assert_contains "$out" "Name [Local Name]:"
+  [[ $(grep -c '^\[include\]' "$repo/home/dot_gitconfig.tmpl") == 1 ]] || fail "dot_gitconfig.tmpl: $(cat "$repo/home/dot_gitconfig.tmpl")"
+}
+
+test_init_commits_past_a_global_hook_and_signing() {
+  init_mac
+  git_user
+  mkdir -p "$sandbox/hooks"
+  printf '#!/bin/sh\nexit 1\n' >"$sandbox/hooks/pre-commit"
+  chmod +x "$sandbox/hooks/pre-commit"
+  git config --global core.hooksPath "$sandbox/hooks"
+  git config --global commit.gpgsign true
+  git config --global gpg.program false
+  run_tty '' '' n -- "$tool" init "$repo"
+  assert_status 0
+  [[ $(git -C "$repo" rev-list --count HEAD) == 1 ]] || fail "no commit"
+}
+
 test_init_ends_the_zshrc_with_the_local_line() {
   init_mac
   git_user
@@ -231,9 +255,11 @@ test_init_appends_to_a_local_file_and_keeps_declined_lines() {
   git_user
   home_file .zshrc $'export GITHUB_TOKEN=abc\n'
   home_file .zshrc.local $'export EARLIER=1\n'
+  chmod 644 "$HOME/.zshrc.local"
   run_tty '' '' n y y -- "$tool" init "$repo"
   assert_status 0
   [[ $(cat "$HOME/.zshrc.local") == $'export EARLIER=1\nexport GITHUB_TOKEN=abc' ]] || fail ".zshrc.local: $(cat "$HOME/.zshrc.local")"
+  [[ $(stat -f %Lp "$HOME/.zshrc.local") == 600 ]] || fail ".zshrc.local mode $(stat -f %Lp "$HOME/.zshrc.local")"
 
   rm -rf "$repo"
   run_tty '' '' n y n -- "$tool" init "$repo"

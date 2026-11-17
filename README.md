@@ -316,8 +316,9 @@ becomes `dot_gitconfig.tmpl`, its `[user]` name and email read from
 secrets: an `export` of a name holding `TOKEN`, `SECRET`, `KEY` or
 `PASSWORD`; a value starting `ghp_`, `github_pat_`, `sk-`, `AKIA` or `xox`;
 a URL with a password; a `.gitconfig` `extraHeader`. It offers to move them
-to `~/.gitconfig.local` or `~/.zshrc.local`, created mode `0600`, which leaves
-them out of the state repo. A moved `.gitconfig` line takes its section's
+to `~/.gitconfig.local` or `~/.zshrc.local`, which it leaves mode `0600`,
+out of the state repo. The `.local` file loads last, so a line that uses a
+moved one belongs there too. A moved `.gitconfig` line takes its section's
 header with it, and a moved header its whole section. `init` changes only the
 state repo and the `.local` files, never `~/.gitconfig` or `~/.zshrc`
 themselves: they gain the includes when `bootstrap` applies the captured

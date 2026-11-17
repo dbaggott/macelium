@@ -2371,8 +2371,8 @@ gitconfig_local_section=$'[include]\n\tpath = ~/.gitconfig.local'
 
 # Takes the question and its default, which may be empty. Asks on the
 # terminal, again while the reply and the default are both empty, and prints
-# the reply, or the default for an empty one. End-of-file gives the default,
-# and fails when there is none.
+# the reply, or the default for an empty one. End-of-file gives what was
+# typed, else the default, and fails when there is neither.
 ask_value() {
   local question=$1 answer
   [[ -n $2 ]] && question="$1 [$2]"
@@ -2381,7 +2381,7 @@ ask_value() {
     printf '%s: ' "$question" >/dev/tty
     if ! read -r answer </dev/tty; then
       printf '\n' >/dev/tty
-      [[ -n $2 ]] || return 1
+      [[ -n $answer || -n $2 ]] || return 1
     fi
     [[ -n $answer ]] || answer=$2
     if [[ -n $answer ]]; then
@@ -2456,17 +2456,22 @@ split_lines() {
 
 # Takes a gitconfig on stdin. Prints it as a chezmoi template: its [user]
 # name and email read the state repo's values, any {{ in it stays literal,
-# and it ends with the section that includes ~/.gitconfig.local.
+# and it ends with the section that includes ~/.gitconfig.local, unless it
+# already does.
 gitconfig_template() {
-  awk '
+  local template
+  template=$(awk '
     { gsub(/[{][{]/, "{{ \"{{\" }}") }
     /^[[:space:]]*\[/ { user = (tolower($0) ~ /^[[:space:]]*\[user\][[:space:]]*$/); print; next }
     user && match(tolower($0), /^[[:space:]]*name[[:space:]]*=/) { print substr($0, 1, RLENGTH) " {{ .name }}"; next }
     user && match(tolower($0), /^[[:space:]]*email[[:space:]]*=/) { print substr($0, 1, RLENGTH) " {{ .email }}"; next }
     { print }
-    END { if (NR) print "" }
-  '
-  printf '%s\n' "$gitconfig_local_section"
+  ')
+  if [[ $(grep -v '^[[:space:]]*$' <<<"$template" | tail -n 2) == "$gitconfig_local_section" ]]; then
+    printf '%s\n' "$template"
+  else
+    printf '%s\n\n%s\n' "$template" "$gitconfig_local_section"
+  fi
 }
 
 # Takes the file's path under the home directory, whether the state repo is
@@ -2502,11 +2507,11 @@ offer_move() {
   fi
 }
 
-# Takes a .local file and the lines to add to it. Appends them, creating the
-# file mode 0600.
+# Takes a .local file and the lines to add to it. Appends them, leaving the
+# file mode 0600, since they look like secrets.
 append_local() {
   [[ -n $2 ]] || return 0
-  (umask 077 && printf '%s\n' "$2" >>"$1")
+  (umask 077 && printf '%s\n' "$2" >>"$1") && chmod 600 "$1"
 }
 
 # Takes [--public] and the path. Captures this Mac into a new state repo at
@@ -2525,8 +2530,8 @@ init_command() {
   fi
 
   local default_name default_email user name email
-  default_name=$(git config --global user.name)
-  default_email=$(git config --global user.email)
+  default_name=$(git config --global --includes user.name)
+  default_email=$(git config --global --includes user.email)
   if [[ -z $default_name || -z $default_email ]] && command -v gh >/dev/null &&
     gh auth status >/dev/null 2>&1 && user=$(gh api user 2>/dev/null); then
     [[ -n $default_name ]] || default_name=$(jq -r '.name // empty' <<<"$user")
@@ -2585,7 +2590,8 @@ init_command() {
       { [[ -z $mise ]] || { mkdir -p "$home/dot_config/mise" && printf '%s\n' "$mise" >"$home/dot_config/mise/config.toml"; }; } &&
       git init -q -b main "$path" &&
       git -C "$path" add -A &&
-      git -C "$path" -c user.name="$name" -c user.email="$email" commit -q -m 'Capture this Mac with macelium init'
+      git -C "$path" -c user.name="$name" -c user.email="$email" -c commit.gpgsign=false \
+        commit -q --no-verify -m 'Capture this Mac with macelium init'
   }; then
     echo "macelium init: writing $path failed: remove it and run macelium init again" >&2
     return 1
