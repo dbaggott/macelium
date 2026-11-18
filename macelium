@@ -1568,7 +1568,7 @@ apply() {
   fi
   fetch_and_check_behind 1
   if [[ $behind_result == drift ]]; then
-    printf 'The checkout is behind %s by %s:\n' "$upstream" "$(commits_phrase "$(count_lines "$behind_items")")"
+    printf 'Your local macelium state is behind %s by %s:\n' "$upstream" "$(commits_phrase "$(count_lines "$behind_items")")"
     printf '%s\n' "$behind_items" | sed 's/^/  /'
     if confirm "Pull them first?" yes; then
       git -C "$repo" pull --ff-only || return 1
