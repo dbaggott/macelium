@@ -180,14 +180,12 @@ install_macelium() {
 
   # The prompts. Each reads one line of the terminal, and fails at
   # end-of-file, even after a partly typed reply, so a run whose terminal has
-  # gone away stops rather than guess (README.md, "Install").
-  no_answer() {
-    echo "install.sh: stopped: no answer" >&2
-    return 1
-  }
+  # gone away stops at a question and takes no at an offer, rather than guess
+  # (README.md, "Install").
 
   # Takes a question and its default, which may be empty. Sets answer to the
-  # reply, or to the default when the reply is empty.
+  # reply, or to the default when the reply is empty. At end-of-file, says
+  # the run stopped.
   local answer
   ask() {
     local hint=''
@@ -195,6 +193,7 @@ install_macelium() {
     printf '%s%s: ' "$1" "$hint" >/dev/tty
     if ! read -r answer </dev/tty; then
       echo >/dev/tty
+      echo "install.sh: stopped: no answer" >&2
       return 1
     fi
     [[ -n $answer ]] || answer=$2
@@ -215,18 +214,23 @@ install_macelium() {
     done
   }
 
-  # Takes a question, and asks it with yes as the default. Sets yes to yes or
-  # no.
+  # Takes a yes-or-no question and its default, yes or no. Sets yes to the
+  # reply, or to the default when the reply is empty. Fails at end-of-file,
+  # for the caller to stop or take no.
   local yes
   ask_yes() {
-    local reply
-    printf '%s [Y/n] ' "$1" >/dev/tty
+    local reply hint='[y/N]'
+    [[ $2 == no ]] || hint='[Y/n]'
+    printf '%s %s ' "$1" "$hint" >/dev/tty
     if ! read -r reply </dev/tty; then
       echo >/dev/tty
       return 1
     fi
-    yes=no
-    if [[ -z $reply || $reply == [yY] || $reply == [yY][eE][sS] ]]; then yes=yes; fi
+    case $reply in
+      '') yes=$2 ;;
+      [yY] | [yY][eE][sS]) yes=yes ;;
+      *) yes=no ;;
+    esac
   }
 
   # Sets path to the answer to where the state repo goes, R5's default
@@ -257,8 +261,8 @@ install_macelium() {
     local refs view
     found=missing public=no
     if [[ $github == yes ]]; then
-      # With no credential helper, so a gh already signed in reads nothing,
-      # and not once this run has signed in, when gh can say.
+      # No credential helper, so a gh signed in before this run can't make a
+      # private repo read as public. Once this run has signed in, gh decides.
       if [[ $signed_in == no ]] &&
         refs=$(GIT_TERMINAL_PROMPT=0 git -c credential.helper= ls-remote "https://github.com/$repo_path" 2>/dev/null); then
         public=yes found=refs
@@ -270,11 +274,17 @@ install_macelium() {
         echo "install.sh: stopped: looking for $name needs a GitHub sign-in" >&2
         return 1
       }
-      if view=$(gh repo view "$repo_path" --json isEmpty,visibility --jq '"\(.isEmpty) \(.visibility)"' 2>/dev/null); then
-        found=refs
-        [[ $view != true* ]] || found=empty
-        [[ $view != *PUBLIC ]] || public=yes
+      # Only gh's not-found error means there is no repo; any other, such as
+      # a network failure, stops rather than offer to create one.
+      if ! view=$(gh repo view "$repo_path" --json isEmpty,visibility --jq '"\(.isEmpty) \(.visibility)"' 2>&1); then
+        [[ $view == *"Could not resolve to a Repository"* ]] && return 0
+        printf '%s\n' "$view" >&2
+        echo "install.sh: stopped: gh repo view $repo_path failed" >&2
+        return 1
       fi
+      found=refs
+      [[ $view != true* ]] || found=empty
+      [[ $view != *PUBLIC ]] || public=yes
       return 0
     fi
     tell_sign_in "$host"
@@ -307,12 +317,9 @@ install_macelium() {
     # End-of-file on the terminal, as when it has gone away, means no. The
     # Mac is set up by now, so a failed sign-in is reported, not a failure.
     if [[ $1 == yes ]] && ! gh auth status --hostname github.com >/dev/null 2>&1; then
-      local reply
-      printf '%s ' "Sign in to GitHub with gh, so you can push changes from this machine? [Y/n]" >/dev/tty
-      if read -r reply </dev/tty && [[ -z $reply || $reply == [yY] || $reply == [yY][eE][sS] ]]; then
+      if ask_yes "Sign in to GitHub with gh, so you can push changes from this machine?" yes && [[ $yes == yes ]]; then
         sign_in_to_github || echo "==> GitHub sign-in: failed; run gh auth login and gh auth setup-git to push from this machine"
       else
-        [[ -n ${reply:-} ]] || echo >/dev/tty
         echo "==> GitHub sign-in: skipped; run gh auth login and gh auth setup-git to push from this machine"
       fi
     fi
@@ -321,10 +328,7 @@ install_macelium() {
   # The no-argument form's clone: asks the path, then clones and bootstraps,
   # offering the sign-in after when GitHub read the repo without one.
   clone_asked_path() {
-    ask_path || {
-      no_answer
-      return
-    }
+    ask_path || return 1
     read_path_state
     case $path_state in
       empty) clone_and_bootstrap "$public" no ;;
@@ -355,7 +359,7 @@ install_macelium() {
   # Creates the state repo on GitHub from the path and pushes it. A private
   # repo GitHub refuses is offered as a public one, no by default.
   create_on_github() {
-    local visibility=--private reply=''
+    local visibility=--private
     [[ $public == no ]] || visibility=--public
     gh_repo_create "$visibility" && return 0
     if gh repo view "$repo_path" >/dev/null 2>&1; then
@@ -363,11 +367,9 @@ install_macelium() {
       return 1
     fi
     if [[ $visibility == --private ]]; then
-      printf '%s [y/N] ' "GitHub did not create a private repo, for the reason above. Create a public one, which anyone can read, everything captured in it included?" >/dev/tty
-      if read -r reply </dev/tty && [[ $reply == [yY] || $reply == [yY][eE][sS] ]]; then
+      if ask_yes "GitHub did not create a private repo, for the reason above. Create a public one, which anyone can read, everything captured in it included?" no &&
+        [[ $yes == yes ]]; then
         gh_repo_create --public && return 0
-      else
-        [[ -n $reply ]] || echo >/dev/tty
       fi
     fi
     echo "install.sh: stopped: gh repo create $repo_path failed" >&2
@@ -382,20 +384,22 @@ install_macelium() {
       echo "install.sh: stopped: pushing to $name needs a GitHub sign-in" >&2
       return 1
     fi
-    ask_path || {
-      no_answer
-      return
-    }
+    ask_path || return 1
     read_path_state
+    # A clone of the empty repo has nothing to push, and init refuses it.
+    if [[ $path_state == named ]] && ! git -C "$path" rev-parse -q --verify HEAD >/dev/null; then
+      path_state=other
+    fi
     if [[ $path_state == other ]]; then
       echo "install.sh: $path holds something other than a new state repo for $name: run install.sh again and answer another path" >&2
       return 1
     fi
-    if [[ $1 == new && $path_state != named ]]; then
-      choose "Who can read the new repo?" 1 "only you (private)" "anyone (public), including everything init captures" || {
-        no_answer
-        return
-      }
+    if [[ $1 == new && $path_state == named ]]; then
+      echo "install.sh: stopped: $path's remote names $name, which GitHub does not have: run git -C $path remote remove origin, then install.sh again, to create it" >&2
+      return 1
+    fi
+    if [[ $1 == new ]]; then
+      choose "Who can read the new repo?" 1 "only you (private)" "anyone (public), including everything init captures" || return 1
       public=no
       [[ $choice == 1 ]] || public=yes
     fi
@@ -415,15 +419,13 @@ install_macelium() {
       echo "==> macelium init: $path already holds the new state repo"
     fi
 
-    if [[ $path_state == named ]]; then
-      push_state_repo || return 1
-    elif [[ $1 == new ]]; then
+    if [[ $1 == new ]]; then
       create_on_github || return 1
     else
-      git -C "$path" remote add origin "$url" || {
+      if [[ $path_state != named ]] && ! git -C "$path" remote add origin "$url"; then
         echo "install.sh: stopped: git remote add origin $url failed" >&2
         return 1
-      }
+      fi
       push_state_repo || return 1
     fi
 
@@ -452,10 +454,7 @@ install_macelium() {
   # does for it.
   ask_repo() {
     while true; do
-      ask "Your state repo, as <owner>/<repo> on GitHub or a git URL" "" || {
-        no_answer
-        return
-      }
+      ask "Your state repo, as <owner>/<repo> on GitHub or a git URL" "" || return 1
       set_repo "$answer" && break
       echo "install.sh: that is neither <owner>/<repo> nor a git URL" >/dev/tty
     done
@@ -467,17 +466,11 @@ install_macelium() {
   # or creates it when there is none (README.md, "Install").
   guided_install() {
     has_terminal && install_tools || return 1
-    choose "Where is your state repo, or where should a new one go?" 1 "GitHub" "another git host" || {
-      no_answer
-      return
-    }
+    choose "Where is your state repo, or where should a new one go?" 1 "GitHub" "another git host" || return 1
     if [[ $choice == 2 ]]; then
       tell_sign_in "Git host"
       while true; do
-        ask "The state repo's git URL" "" || {
-          no_answer
-          return
-        }
+        ask "The state repo's git URL" "" || return 1
         set_repo "$answer" && break
         echo "install.sh: that is not a git URL" >/dev/tty
       done
@@ -488,10 +481,7 @@ install_macelium() {
 
     local user login
     while true; do
-      ask "Your GitHub username (none if you have no account yet: the sign-in can create one)" "" || {
-        no_answer
-        return
-      }
+      ask "Your GitHub username (leave it empty if you have no account yet: the sign-in can create one)" "" || return 1
       user=$answer
       [[ -z $user || $user =~ ^[A-Za-z0-9-]+$ ]] && break
       echo "install.sh: that is not a GitHub username" >/dev/tty
@@ -499,20 +489,16 @@ install_macelium() {
     if [[ -n $user ]]; then
       set_repo "$user/macelium-state"
       find_repo anonymous
-      case $found in
-        refs)
-          ask_yes "Found $url. Set up this Mac from it?" || {
-            no_answer
-            return
-          }
-          if [[ $yes == yes ]]; then clone_asked_path; else ask_repo; fi
-          return
-          ;;
-        empty)
-          create_state_repo existing
-          return
-          ;;
-      esac
+      if [[ $found != missing ]]; then
+        local question="Found $url. Set up this Mac from it?"
+        [[ $found == refs ]] || question="Found $url, with nothing in it yet. Capture this Mac into it?"
+        if ! ask_yes "$question" yes; then
+          echo "install.sh: stopped: no answer" >&2
+          return 1
+        fi
+        if [[ $yes == yes ]]; then go_on_from_found; else ask_repo; fi
+        return
+      fi
     fi
 
     sign_in_to_github || {
@@ -530,10 +516,7 @@ install_macelium() {
       return
     fi
     choose "No macelium-state repo found for $login. Are you setting this up for the first time, or is your repo named something else?" '' \
-      "first time: capture this Mac into a new $login/macelium-state" "something else: give its name or URL" || {
-      no_answer
-      return
-    }
+      "first time: capture this Mac into a new $login/macelium-state" "something else: give its name or URL" || return 1
     if [[ $choice == 1 ]]; then go_on_from_found new; else ask_repo; fi
   }
 

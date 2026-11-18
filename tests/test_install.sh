@@ -214,7 +214,8 @@ test_install_signs_in_before_the_clone_when_github_refuses_an_anonymous_read() {
 # nothing. gh is signed out until auth login, which signs in as
 # $STUB_GH_LOGIN when that is set and fails otherwise. Its repo create
 # refuses --private when $STUB_GH_PRIVATE_REFUSED is set, and creates the
-# repo but fails to push to it when $STUB_GH_PUSH_FAILS is. macelium's init
+# repo but fails to push to it when $STUB_GH_PUSH_FAILS is; its repo view
+# fails as on a network error when $STUB_GH_VIEW_FAILS is. macelium's init
 # writes a repo with macelium.conf and one commit, as the real one does.
 guided_mac() {
   installable_state
@@ -240,7 +241,12 @@ case "$1 ${2:-}" in
     ;;
   "api user") [[ -e $signed ]] && printf '%s\n' "$STUB_GH_LOGIN" ;;
   "repo view")
-    [[ -e $signed && -d $root/$3.git ]] || exit 1
+    [[ -e $signed ]] || exit 1
+    [[ -z ${STUB_GH_VIEW_FAILS:-} ]] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+    if [[ ! -d $root/$3.git ]]; then
+      echo "GraphQL: Could not resolve to a Repository with the name '$3'. (repository)" >&2
+      exit 1
+    fi
     empty=true visibility=PRIVATE
     [[ -z $(git -C "$root/$3.git" for-each-ref) ]] || empty=false
     [[ ! -e $root/$3.public ]] || visibility=PUBLIC
@@ -276,7 +282,7 @@ fi
 exit "${STUB_MACELIUM_STATUS:-0}"
 STUB
   chmod +x "$sandbox/bin/gh" "$sandbox/bin/macelium"
-  unset STUB_GH_LOGIN STUB_GH_PRIVATE_REFUSED STUB_GH_PUSH_FAILS
+  unset STUB_GH_LOGIN STUB_GH_PRIVATE_REFUSED STUB_GH_PUSH_FAILS STUB_GH_VIEW_FAILS
 }
 
 # Takes <owner>/<repo>, then public or private, then empty, for a repo with
@@ -321,7 +327,7 @@ test_guided_finds_a_public_github_repo_with_no_sign_in() {
   # The terminal shows each prompt on the line its answer's echo ends, so the
   # prompts are checked for, not their order.
   assert_order "$out" "Where is your state repo, or where should a new one go?" "1) GitHub" "2) another git host"
-  assert_contains "$out" "Your GitHub username (none if you have no account yet: the sign-in can create one):"
+  assert_contains "$out" "Your GitHub username (leave it empty if you have no account yet: the sign-in can create one):"
   assert_contains "$out" "Found https://github.com/me/macelium-state. Set up this Mac from it? [Y/n]"
   assert_contains "$out" "Path for the state repo [$HOME/Developer/macelium-state]:"
   assert_order "$out" "==> Cloning me/macelium-state to $HOME/Developer/macelium-state" \
@@ -483,6 +489,54 @@ test_guided_pushes_into_an_empty_github_repo() {
   [[ $(git -C "$HOME/macelium-state" config --get remote.origin.url) == https://github.com/me/macelium-state ]] ||
     fail "origin: $(git -C "$HOME/macelium-state" config --get remote.origin.url)"
   assert_pushed "$sandbox/github/me/macelium-state.git"
+}
+
+test_guided_confirms_an_empty_public_github_repo_before_capturing_into_it() {
+  guided_mac
+  export STUB_GH_LOGIN=me
+  github_repo me/macelium-state public empty
+  run_tty '' me '' '' -- bash "$installer"
+  assert_status 0
+  assert_contains "$out" "Found https://github.com/me/macelium-state, with nothing in it yet. Capture this Mac into it? [Y/n]"
+  assert_order "$STUB_LOG" "gh auth login" "macelium init --public $HOME/macelium-state tty=yes" \
+    "macelium bootstrap $HOME/macelium-state tty=yes"
+  assert_not_contains "$STUB_LOG" "gh repo create"
+  assert_pushed "$sandbox/github/me/macelium-state.git"
+}
+
+test_guided_stops_when_gh_cannot_say_whether_the_repo_exists() {
+  guided_mac
+  export STUB_GH_LOGIN=me STUB_GH_VIEW_FAILS=1
+  run_tty '' me "$eof" "$eof" -- bash "$installer"
+  assert_status 1
+  assert_order "$out" "HTTP 502: Bad Gateway" "install.sh: stopped: gh repo view me/macelium-state failed"
+  assert_not_contains "$out" "No macelium-state repo found"
+  assert_not_contains "$STUB_LOG" "macelium init"
+}
+
+test_guided_refuses_to_create_for_a_path_whose_remote_names_a_missing_repo() {
+  guided_mac
+  export STUB_GH_LOGIN=me
+  "$sandbox/bin/macelium" init "$HOME/macelium-state" </dev/null
+  git -C "$HOME/macelium-state" remote add origin https://github.com/me/macelium-state
+  : >"$STUB_LOG"
+  run_tty '' me 1 '' "$eof" "$eof" -- bash "$installer"
+  assert_status 1
+  assert_contains "$out" "install.sh: stopped: $HOME/macelium-state's remote names me/macelium-state, which GitHub does not have"
+  assert_not_contains "$STUB_LOG" "gh repo create"
+  assert_not_contains "$STUB_LOG" "macelium bootstrap"
+}
+
+test_guided_refuses_a_clone_of_the_empty_repo_it_would_push_into() {
+  guided_mac
+  git init -q --bare "$sandbox/empty.git"
+  git config --global url."file://$sandbox/empty.git".insteadOf https://git.example.org/me/empty
+  git clone -q https://git.example.org/me/empty "$HOME/empty" 2>/dev/null
+  run_tty 2 https://git.example.org/me/empty '' -- bash "$installer"
+  assert_status 1
+  assert_contains "$out" "install.sh: $HOME/empty holds something other than a new state repo for https://git.example.org/me/empty"
+  assert_not_contains "$STUB_LOG" "macelium init"
+  assert_not_contains "$out" "==> Pushing"
 }
 
 test_guided_refuses_a_path_holding_something_else_before_init() {
