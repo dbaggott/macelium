@@ -33,9 +33,10 @@
 #
 # bootstrap sets up a machine from a checkout, the one named or else the one
 # chezmoi's config names, before anything is applied or again at any point
-# after. It opens with a banner, then checks what it needs from macOS, App
+# after. It opens with a banner, refuses a chezmoi setup that is not
+# macelium's as init does, then checks what it needs from macOS, App
 # Management and Full Disk Access for the terminal, and stops naming each that
-# is missing. It then asks for sudo once for its own steps (Homebrew asks
+# is missing, and warns when FileVault is off. It then asks for sudo once for its own steps (Homebrew asks
 # again when a cask needs sudo), runs chezmoi init and applies the files, then
 # runs each chezmoi script and each of apply's steps as its own step, so one
 # that fails stops none after it, with the output in its log. It ends with the
@@ -46,6 +47,9 @@
 # email it asks for, and, each on a yes, ~/.gitconfig, ~/.zshrc and the mise
 # config, offering to move lines that look like secrets to ~/.gitconfig.local
 # and ~/.zshrc.local. It commits once, and neither pushes nor bootstraps.
+# Before any of that, it refuses a Mac with a chezmoi setup that is not
+# macelium's, a config naming a source with no macelium.conf or, with no
+# config, a non-empty ~/.local/share/chezmoi, saying how to remove it.
 #
 # settings writes the macOS settings that differ from the list, the state
 # repo's unless --file names another, without asking, and restarts the apps
@@ -207,8 +211,8 @@ check_chezmoi() {
   fi
 }
 
-# Sets repo to the checkout, or repo_detail to why it was not found.
-find_checkout() {
+# Prints the checkout chezmoi's config names, or, failing, why.
+chezmoi_checkout() {
   local command='chezmoi source-path' out status
   # chezmoi source-path may name the .chezmoiroot directory inside the
   # checkout, so the checkout is the git top level of what it prints.
@@ -219,11 +223,60 @@ find_checkout() {
     out=$(git -C "$out" rev-parse --show-toplevel 2>&1)
     status=$?
     if ((status == 0)); then
-      use_checkout "$out"
-      return
+      printf '%s\n' "$out"
+      return 0
     fi
   fi
-  repo_detail="checkout not found: $(failure_detail "$command" "$out" "$status")"
+  failure_detail "$command" "$out" "$status"
+  return 1
+}
+
+# Sets repo to the checkout, or repo_detail to why it was not found.
+find_checkout() {
+  local out
+  if out=$(chezmoi_checkout); then
+    use_checkout "$out"
+  else
+    repo_detail="checkout not found: $out"
+  fi
+}
+
+# Takes the command, for its message. Changes nothing. Returns non-zero,
+# having said how to remove it, when this Mac has a chezmoi setup that is not
+# macelium's, whose config bootstrap's chezmoi init would replace: a config
+# file whose source is not in a checkout with macelium.conf at its root, or
+# no config file and a source directory that is not empty.
+refuse_foreign_chezmoi() {
+  local config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi
+  local source_dir=${XDG_DATA_HOME:-$HOME/.local/share}/chezmoi
+  local config found='' out reason
+  for config in "$config_dir"/chezmoi.{toml,yaml,json,jsonc}; do
+    if [[ -e $config ]]; then
+      found=$config
+      break
+    fi
+  done
+  if [[ -n $found ]]; then
+    if ! out=$(chezmoi_checkout); then
+      reason="$found names no source in a git checkout: $out"
+    elif [[ ! -f $out/macelium.conf ]]; then
+      reason="$found names a source in $out, which has no macelium.conf"
+    else
+      return 0
+    fi
+  elif [[ -d $source_dir && -n $(ls -A "$source_dir") ]]; then
+    reason="$source_dir holds a chezmoi source, and there is no chezmoi config"
+  else
+    return 0
+  fi
+  printf 'macelium %s: this Mac has a chezmoi setup that is not macelium'\''s: %s\n' "$1" "$reason" >&2
+  printf '%s\n' '' "macelium manages chezmoi itself. To switch to macelium:" \
+    "  1. Save the old chezmoi source if it holds anything not saved elsewhere, such as commits not pushed." \
+    "  2. Keep a copy of any age or gpg key file the old setup uses, such as one in $config_dir." \
+    "  3. Run \`chezmoi purge\`, which removes chezmoi's config, state and source, and leaves the files it manages in place." \
+    "  4. Run macelium $1 again." \
+    "The files left in place are what \`macelium init\` captures." >&2
+  return 1
 }
 
 # Takes a checkout, and sets repo to it once its manifest loads, or
@@ -1721,6 +1774,15 @@ check_preflight() {
   fi
 }
 
+# Warns, at once and among the warnings at the end, when FileVault is off.
+# Says nothing when fdesetup fails or prints anything else.
+check_filevault() {
+  [[ $(fdesetup status 2>/dev/null) == 'FileVault is Off.' ]] || return 0
+  local line='FileVault is off, and it is what protects the files the state repo puts on this Mac while the Mac is off: turn it on in System Settings -> Privacy & Security -> FileVault.'
+  printf '\nWarning: %s\n' "$line" >&2
+  warn "$line"
+}
+
 # Asks for the password once for macelium's own steps, and keeps sudo's
 # credentials fresh until the bootstrap exits. Homebrew discards them the
 # first time a brew process needs sudo, so a cask that runs sudo asks again.
@@ -2291,6 +2353,7 @@ bootstrap() {
     fi
     eval "$("$prefix/bin/brew" shellenv bash)"
   fi
+  refuse_foreign_chezmoi bootstrap || return 1
   rerun='macelium bootstrap'
   if (($# == 1)); then
     local dir
@@ -2314,6 +2377,7 @@ bootstrap() {
     printf '\n%s' "$preflight_problems" >&2
     return 1
   fi
+  check_filevault
 
   start_sudo || {
     echo "macelium bootstrap: stopped: sudo failed" >&2
@@ -2553,6 +2617,7 @@ init_command() {
   fi
   (($# == 1)) || usage
   path=$1
+  refuse_foreign_chezmoi init || return 1
   if [[ -e $path && ! -d $path ]] || [[ -d $path && -n $(ls -A "$path") ]]; then
     echo "macelium init: $path exists and is not empty: name a new or empty directory" >&2
     return 1
