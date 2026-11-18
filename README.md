@@ -253,7 +253,7 @@ macOS notification when the exit status is not 0.
 5. the apps hooks, when the plan listed them.
 
 While `brew bundle` or `mise install` runs, a status line shows the step's
-time so far and the download Homebrew is making, behind a growing mushroom,
+time so far and the download Homebrew is making, behind a mushroom spinner,
 and gives way to any sudo password prompt. The terminal shows only
 Homebrew's `Tapping`, `Installing` and `Upgrading` lines, and the step's
 full output is in
@@ -287,7 +287,7 @@ the manifest's `init_notes` when the machine has no chezmoi config, runs
 `apply`'s steps, then runs as its own step, so one that fails stops none
 after it, with its output in `~/Library/Logs/macelium-bootstrap.log`. While a
 step runs, a status line shows its time so far and the download Homebrew is
-making, behind a growing mushroom, and gives way to any sudo password prompt.
+making, behind a mushroom spinner, and gives way to any sudo password prompt.
 Homebrew discards sudo's credentials the first time it needs sudo, so each
 `brew bundle` step that installs a cask needing sudo asks to authenticate
 again, once. It ends with the plan, each step's result, and the manual steps.
