@@ -362,6 +362,16 @@ test_bootstrap_refuses_a_config_naming_a_missing_source() {
   make_state macelium.conf $'contract 1\n'
   chezmoi_config "$sandbox/missing"
   assert_bootstrap_refused
+  assert_contains "$out" "If it named a macelium checkout that has moved or been removed, run \`chezmoi init --source <checkout>\`"
+}
+
+test_bootstrap_names_a_missing_directory_before_refusing_a_setup() {
+  other_source
+  chezmoi_config "$other"
+  run_tty -- "$tool" bootstrap "$sandbox/missing"
+  assert_status 1
+  assert_contains "$out" "macelium bootstrap: no directory $sandbox/missing"
+  assert_not_contains "$out" "not macelium's"
 }
 
 test_bootstrap_refuses_a_config_chezmoi_cannot_read() {
@@ -414,6 +424,9 @@ test_bootstrap_warns_when_filevault_is_off_and_goes_on() {
   sed -n '/^Steps:/,$p' "$out" | grep -qF "Warning: FileVault is off" || fail "no FileVault warning at the end"
   assert_contains "$out" "System Settings -> Privacy & Security -> FileVault"
   assert_contains "$out" "Bootstrap complete, with 1 warning."
+  export STUB_FDESETUP_STATUS=$'FileVault is Off.\nA line after it.'
+  run_tty -- "$tool" bootstrap "$state"
+  assert_contains "$out" "Warning: FileVault is off"
 }
 
 test_bootstrap_says_nothing_of_filevault_when_on_or_unknown() {

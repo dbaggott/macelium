@@ -36,8 +36,9 @@
 # after. It opens with a banner, refuses a chezmoi setup that is not
 # macelium's as init does, then checks what it needs from macOS, App
 # Management and Full Disk Access for the terminal, and stops naming each that
-# is missing, and warns when FileVault is off. It then asks for sudo once for its own steps (Homebrew asks
-# again when a cask needs sudo), runs chezmoi init and applies the files, then
+# is missing, and warns when FileVault is off. It then asks for sudo once
+# for its own steps (Homebrew asks again when a cask needs sudo), runs
+# chezmoi init and applies the files, then
 # runs each chezmoi script and each of apply's steps as its own step, so one
 # that fails stops none after it, with the output in its log. It ends with the
 # plan, each step's result, and the manual steps.
@@ -258,7 +259,7 @@ refuse_foreign_chezmoi() {
   done
   if [[ -n $found ]]; then
     if ! out=$(chezmoi_checkout); then
-      reason="$found names no source in a git checkout: $out"
+      reason="$found names no source in a git checkout: $out"$'\n'"If it named a macelium checkout that has moved or been removed, run \`chezmoi init --source <checkout>\` to name the checkout instead."
     elif [[ ! -f $out/macelium.conf ]]; then
       reason="$found names a source in $out, which has no macelium.conf"
     else
@@ -1777,7 +1778,8 @@ check_preflight() {
 # Warns, at once and among the warnings at the end, when FileVault is off.
 # Says nothing when fdesetup fails or prints anything else.
 check_filevault() {
-  [[ $(fdesetup status 2>/dev/null) == 'FileVault is Off.' ]] || return 0
+  # Its first line only, as it may print more after it.
+  [[ $(fdesetup status 2>/dev/null | head -n 1) == 'FileVault is Off.' ]] || return 0
   local line='FileVault is off, and it is what protects the files the state repo puts on this Mac while the Mac is off: turn it on in System Settings -> Privacy & Security -> FileVault.'
   printf '\nWarning: %s\n' "$line" >&2
   warn "$line"
@@ -2353,14 +2355,14 @@ bootstrap() {
     fi
     eval "$("$prefix/bin/brew" shellenv bash)"
   fi
-  refuse_foreign_chezmoi bootstrap || return 1
   rerun='macelium bootstrap'
-  if (($# == 1)); then
-    local dir
-    if ! dir=$(cd "$1" 2>/dev/null && pwd -P); then
-      echo "macelium bootstrap: no directory $1" >&2
-      return 1
-    fi
+  local dir=''
+  if (($# == 1)) && ! dir=$(cd "$1" 2>/dev/null && pwd -P); then
+    echo "macelium bootstrap: no directory $1" >&2
+    return 1
+  fi
+  refuse_foreign_chezmoi bootstrap || return 1
+  if [[ -n $dir ]]; then
     use_checkout "$dir"
     rerun+=" $(printf '%q' "$dir")"
   else
