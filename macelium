@@ -1526,6 +1526,7 @@ plan() {
   while (($#)); do
     case $1 in
       --notify) mode=notify attempts=$notify_fetch_attempts ;;
+      -h | --help) help_and_exit ;;
       *) unexpected_argument "$1" ;;
     esac
     shift
@@ -1568,12 +1569,12 @@ confirm() {
 
 apply_log="$HOME/Library/Logs/macelium-apply.log"
 
-# Takes terminal or logged, a step's name and its command. Runs it as that
-# kind of step, stopping apply when it fails.
+# Takes run_terminal_step or run_logged_step, a step's name and its command.
+# Runs it as that kind of step, stopping apply when it fails.
 run_apply_step() {
-  local kind=$1
+  local run=$1
   shift
-  "run_${kind}_step" "$@" && return 0
+  "$run" "$@" && return 0
   print_stopped "$1 failed"
   return 1
 }
@@ -1601,7 +1602,11 @@ upgrade_self() {
 }
 
 apply() {
-  (($# == 0)) || unexpected_argument "$1"
+  case ${1:-} in
+    '') ;;
+    -h | --help) help_and_exit ;;
+    *) unexpected_argument "$1" ;;
+  esac
   require_terminal || return 1
   if [[ -n ${MACELIUM_UPGRADED_FROM:-} ]]; then
     printf 'macelium was upgraded from %s to %s, and plans again.\n\n' "$MACELIUM_UPGRADED_FROM" "$VERSION"
@@ -1652,9 +1657,9 @@ apply() {
   # Without an upgrade in the plan, no step upgrades, a state repo's chezmoi
   # script that runs brew bundle included.
   ((upgrades > 0)) || export HOMEBREW_BUNDLE_NO_UPGRADE=1
-  run_apply_step terminal "chezmoi apply" chezmoi apply --force || return 1
+  run_apply_step run_terminal_step "chezmoi apply" chezmoi apply --force || return 1
   use_step_log "$apply_log"
-  run_install_steps stop run_apply_step logged || return 1
+  run_install_steps stop run_apply_step run_logged_step || return 1
   if [[ -n $macos_items ]]; then
     print_heading "macOS settings"
     if ! write_settings when-writing; then
@@ -1679,10 +1684,11 @@ settings_command() {
   while (($#)); do
     case $1 in
       --file)
-        (($# >= 2)) || usage_error "--file needs a path"
+        [[ -n ${2:-} ]] || usage_error "--file needs a path"
         settings_file=$2
         shift
         ;;
+      -h | --help) help_and_exit ;;
       *) unexpected_argument "$1" ;;
     esac
     shift
@@ -2080,22 +2086,24 @@ step_clear() {
 }
 
 # Takes what is being done, and draws it on the cursor's line, led by the
-# spinner and cut to the terminal's width, until killed or this macelium
-# exits.
+# spinner and cut to the terminal's width, then turns the spinner until
+# killed or this macelium exits. Each frame saves and restores the cursor, so
+# a prompt the command writes after what is being done, such as ssh's for a
+# key's passphrase, stays whole, with the cursor after it.
 spin() {
   local frame=0 columns
   columns=$(terminal_size)
   columns=${columns#* }
-  while kill -0 "$$" 2>/dev/null; do
-    printf '\r%.*s' $((columns - 1)) "  ${spinner[frame % ${#spinner[@]}]} $1"
+  printf '\r%.*s' $((columns - 1)) "  ${spinner[0]} $1"
+  while sleep "$frame_time" && kill -0 "$$" 2>/dev/null; do
     ((frame++))
-    sleep "$frame_time"
+    printf '\0337\r  %s\0338' "${spinner[frame % ${#spinner[@]}]}"
   done
 }
 
 # Takes what is being done and a command. Runs the command in this shell, so
 # what it sets stays set, while, on a terminal, the spinner turns beside what
-# is being done. The command must print nothing to the terminal.
+# is being done.
 with_spinner() {
   local label=$1 spinner_pid status
   shift
@@ -2453,6 +2461,7 @@ bootstrap() {
   local checkout=''
   while (($#)); do
     case $1 in
+      -h | --help) help_and_exit ;;
       -*) unexpected_argument "$1" ;;
       *)
         [[ -z $checkout ]] || unexpected_argument "$1"
@@ -2725,6 +2734,7 @@ init_command() {
   while (($#)); do
     case $1 in
       --public) public=yes ;;
+      -h | --help) help_and_exit ;;
       -*) unexpected_argument "$1" ;;
       *)
         [[ -z $path ]] || unexpected_argument "$1"
@@ -2932,6 +2942,12 @@ usage_error() {
   exit 1
 }
 
+# Prints the command's help, then exits 0.
+help_and_exit() {
+  print_help "$subcommand"
+  exit 0
+}
+
 # Takes an argument the command does not take.
 unexpected_argument() {
   if [[ $1 == -* ]]; then
@@ -2942,11 +2958,20 @@ unexpected_argument() {
 }
 
 help_command() {
-  (($# <= 1)) || unexpected_argument "$2"
-  if [[ -n ${1:-} && -z $(synopsis "$1") ]]; then
-    usage_error "unknown command '$1'"
-  fi
-  print_help "${1:-}"
+  local command=''
+  while (($#)); do
+    case $1 in
+      -h | --help) help_and_exit ;;
+      -*) unexpected_argument "$1" ;;
+      *)
+        [[ -z $command ]] || unexpected_argument "$1"
+        [[ -n $(synopsis "$1") ]] || usage_error "unknown command '$1'"
+        command=$1
+        ;;
+    esac
+    shift
+  done
+  print_help "$command"
 }
 
 # Sourced, as the tests do to reach one function, it defines and runs nothing.
@@ -2956,12 +2981,6 @@ case ${1:-} in
   init | bootstrap | plan | apply | settings | help)
     subcommand=$1
     shift
-    for arg in "$@"; do
-      if [[ $arg == -h || $arg == --help ]]; then
-        print_help "$subcommand"
-        exit 0
-      fi
-    done
     ;;
 esac
 

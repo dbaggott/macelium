@@ -3,46 +3,36 @@
 # etc/bash_completion.d. tests/test_cli.sh checks it offers every command and
 # option macelium --help lists.
 
-# Takes the words to offer, and sets COMPREPLY to those the current word
-# starts.
-_macelium_offer() {
-  local word
+# Takes compgen's options, and sets COMPREPLY to what compgen offers for the
+# current word: -W and the words, -d for directories or -f for files.
+_macelium_compgen() {
+  local reply
   COMPREPLY=()
-  while IFS= read -r word; do
-    COMPREPLY+=("$word")
-  done < <(compgen -W "$1" -- "${COMP_WORDS[COMP_CWORD]}")
-}
-
-# Takes -d for directories or -f for files, and sets COMPREPLY to the paths
-# the current word starts.
-_macelium_paths() {
-  local path
-  COMPREPLY=()
-  while IFS= read -r path; do
-    COMPREPLY+=("$path")
-  done < <(compgen "$1" -- "${COMP_WORDS[COMP_CWORD]}")
+  while IFS= read -r reply; do
+    COMPREPLY+=("$reply")
+  done < <(compgen "$@" -- "${COMP_WORDS[COMP_CWORD]}")
 }
 
 _macelium() {
   local commands='init bootstrap plan apply settings help'
   local current=${COMP_WORDS[COMP_CWORD]} previous=${COMP_WORDS[COMP_CWORD - 1]}
   if ((COMP_CWORD == 1)); then
-    _macelium_offer "$commands -h --help -V --version"
+    _macelium_compgen -W "$commands -h --help -V --version"
     return
   fi
   case ${COMP_WORDS[1]} in
     init)
-      if [[ $current == -* ]]; then _macelium_offer '--public -h --help'; else _macelium_paths -d; fi
+      if [[ $current == -* ]]; then _macelium_compgen -W '--public -h --help'; else _macelium_compgen -d; fi
       ;;
     bootstrap)
-      if [[ $current == -* ]]; then _macelium_offer '-h --help'; else _macelium_paths -d; fi
+      if [[ $current == -* ]]; then _macelium_compgen -W '-h --help'; else _macelium_compgen -d; fi
       ;;
-    plan) _macelium_offer '--notify -h --help' ;;
-    apply) _macelium_offer '-h --help' ;;
+    plan) _macelium_compgen -W '--notify -h --help' ;;
+    apply) _macelium_compgen -W '-h --help' ;;
     settings)
-      if [[ $previous == --file ]]; then _macelium_paths -f; else _macelium_offer '--file -h --help'; fi
+      if [[ $previous == --file ]]; then _macelium_compgen -f; else _macelium_compgen -W '--file -h --help'; fi
       ;;
-    help) if ((COMP_CWORD == 2)); then _macelium_offer "$commands"; fi ;;
+    help) if ((COMP_CWORD == 2)); then _macelium_compgen -W "$commands"; fi ;;
   esac
 }
 

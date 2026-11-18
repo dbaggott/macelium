@@ -75,11 +75,11 @@ test_plan_on_a_terminal_shows_the_spinner_then_the_plan() {
   [[ $raw == *$'\r\033[K'*'No changes. This machine matches the state repo.'* ]] || fail "the spinner's line was not cleared before the plan"
 }
 
-test_with_spinner_cuts_its_line_to_the_terminal_width() {
+test_with_spinner_cuts_its_line_to_the_terminal_width_and_turns_in_place() {
   # shellcheck disable=SC2016 # expanded by the inner bash
   run_tty_raw 2 /bin/bash -c 'stty cols 20; source "$1"; with_spinner "a label far wider than the terminal" sleep 0.5' _ "$tool"
   assert_status 0
   local raw
   raw=$(cat "$out")
-  [[ $raw == *$'\r  '???' a label far w'$'\r'* ]] || fail "the line was not cut to 19 columns"
+  [[ $raw == *$'\r  '???' a label far w'$'\0337\r  '???$'\0338'* ]] || fail "the line was not cut to 19 columns, or no frame was drawn in place"
 }

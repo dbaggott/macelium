@@ -44,6 +44,10 @@ test_a_command_help_prints_its_usage_and_runs_nothing() {
     assert_status 0
     assert_contains "$out" "Usage: macelium $command"
   done
+  # A list named -h is a list, not a request for the help.
+  run settings --file -h
+  assert_status 1
+  assert_contains "$err" "cannot read the settings list ./-h"
   run init --public -h
   assert_status 0
   assert_contains "$out" "Usage: macelium init [--public] <path>"
@@ -65,6 +69,9 @@ test_an_unknown_command_or_option_names_it_with_the_usage() {
   assert_status 1
   assert_contains "$err" "macelium apply: unexpected argument 'now'"
   run settings --file
+  assert_status 1
+  assert_contains "$err" "macelium settings: --file needs a path"
+  run settings --file ''
   assert_status 1
   assert_contains "$err" "macelium settings: --file needs a path"
   run help frobnicate
