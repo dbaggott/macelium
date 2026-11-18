@@ -2080,11 +2080,14 @@ step_clear() {
 }
 
 # Takes what is being done, and draws it on the cursor's line, led by the
-# spinner, until killed or this macelium exits.
+# spinner and cut to the terminal's width, until killed or this macelium
+# exits.
 spin() {
-  local frame=0
+  local frame=0 columns
+  columns=$(terminal_size)
+  columns=${columns#* }
   while kill -0 "$$" 2>/dev/null; do
-    printf '\r  %s %s' "${spinner[frame % ${#spinner[@]}]}" "$1"
+    printf '\r%.*s' $((columns - 1)) "  ${spinner[frame % ${#spinner[@]}]} $1"
     ((frame++))
     sleep "$frame_time"
   done
