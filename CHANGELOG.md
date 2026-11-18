@@ -17,11 +17,11 @@ contract than its own.
 ## 0.7.2
 
 - The loop that keeps sudo's credentials fresh during `macelium bootstrap`
-  runs `sudo -n -v`, which runs no command, in place of `sudo -n true`. sudo
-  relays the terminal's input to a command it runs, so the loop could take
-  input meant for a step: a likely cause of the terminal's answer to
-  chezmoi's color query (`^[]11;rgb:…^[\^[[…R`) showing after
-  `chezmoi init`.
+  runs off the terminal and runs `sudo -n -v`, which runs no command, in
+  place of `sudo -n true`. sudo relays the terminal's input to a command it
+  runs, so the loop could take input meant for a step: a likely cause of
+  the terminal's answer to chezmoi's color query (`^[]11;rgb:…^[\^[[…R`)
+  showing after `chezmoi init`.
 
 ## 0.7.1
 

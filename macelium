@@ -1841,7 +1841,7 @@ start_sudo() {
   echo
   echo "The bootstrap installs your applications, and the first run can take a long time."
   # sudo reuses credentials it was given recently, in this terminal, without asking.
-  if ! sudo -n true 2>/dev/null; then
+  if ! sudo -n -v 2>/dev/null; then
     echo "You'll be asked to authenticate now."
   fi
   if [[ -e $state_brewfile ]]; then
@@ -1850,14 +1850,17 @@ start_sudo() {
   fi
   echo
   sudo -v || return 1
-  # -v refreshes the credentials without running a command: sudo runs a
-  # command in a pty of its own and relays the terminal's input to it, away
-  # from the step reading the terminal.
-  while kill -0 "$$" 2>/dev/null; do
-    sudo -n -v 2>/dev/null
-    sleep 50
-  done &
-  keeper=$!
+  # The keeper is off the terminal, since under use_pty, sudo's default, sudo
+  # relays the terminal's input to the command it runs, away from the step
+  # reading it. It is outside this process's tree, where prompting_sudo
+  # would take its sudo for one asking for a password.
+  keeper=$(
+    while kill -0 "$$" 2>/dev/null; do
+      sudo -n -v
+      sleep 50
+    done </dev/null >/dev/null 2>&1 &
+    echo $!
+  )
   # shellcheck disable=SC2064 # the keeper's pid is known now
   trap "kill $keeper 2>/dev/null" EXIT
 }
