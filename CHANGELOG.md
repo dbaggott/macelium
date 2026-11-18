@@ -14,6 +14,27 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## Unreleased
+
+- `macelium --help`, `-h` and `macelium help [<command>]` print the commands,
+  or one command's usage and options, and `macelium <command> --help` a
+  command's. A command given an argument it doesn't take names it, prints
+  the command's usage and exits 1, as before; the usage line starts
+  `Usage:`. `macelium` with no command prints the help to stderr and exits
+  1.
+- The formula installs zsh and bash completions of the commands, their
+  options, and the paths they take.
+- `plan` and `apply` show the spinner while they fetch the state repo and
+  compare the machine with it, which can take a while before the plan
+  prints.
+- The `brew bundle` steps of `apply` and `bootstrap` name their Brewfile:
+  `brew bundle, the state repo's Brewfile` and
+  `brew bundle, this machine's Brewfile.local`.
+- `bootstrap`'s closing plan says the packages installed but not listed were
+  on the Mac before the bootstrap only when there are some, under their
+  heading, and a plan with no differences says
+  `No changes. This machine matches the state repo.`
+
 ## 0.6.0
 
 - `bootstrap`'s banner spells dnbg's name, a letter every few columns, into

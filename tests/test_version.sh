@@ -16,5 +16,5 @@ test_version_prints_the_version_line() {
 test_version_takes_no_argument() {
   run --version extra
   assert_status 1
-  assert_contains "$err" "usage: macelium"
+  assert_contains "$err" "Usage: macelium"
 }

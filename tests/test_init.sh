@@ -293,7 +293,7 @@ test_init_takes_an_empty_directory() {
 test_init_without_a_path_prints_usage() {
   run init --public
   assert_status 1
-  assert_contains "$err" "usage: macelium init [--public] <path>"
+  assert_contains "$err" "Usage: macelium init [--public] <path>"
 }
 
 test_init_end_of_file_takes_the_defaults_and_declines_every_capture() {

@@ -2,7 +2,8 @@
 # shellcheck disable=SC2016 # the $prefix and $log in the tests are jq's
 # Installs the macelium formula, runs its test, starts its service, and checks
 # the launchd plist Homebrew writes for it: the 09:00 schedule and no run on
-# load, `plan --notify`, Homebrew's bin on PATH and the drift log. release.yml's
+# load, `plan --notify`, Homebrew's bin on PATH and the drift log; and that
+# it installed the bash and zsh completions. release.yml's
 # verify job runs it on a macOS runner after writing the tap. It starts a
 # service, so it is for a runner, not for a Mac in use.
 #
@@ -51,5 +52,14 @@ expect '.RunAtLoad == false'
 expect '.EnvironmentVariables.PATH | split(":") | index($prefix + "/bin") != null'
 expect '.StandardOutPath == $log'
 expect '.StandardErrorPath == $log'
+
+for completion in "$prefix/etc/bash_completion.d/macelium" "$prefix/share/zsh/site-functions/_macelium"; do
+  if [[ -f $completion ]]; then
+    echo "ok: $completion"
+  else
+    echo "FAILED: no $completion"
+    failed=1
+  fi
+done
 
 exit "$failed"

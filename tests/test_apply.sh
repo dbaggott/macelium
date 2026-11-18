@@ -38,7 +38,7 @@ test_apply_logs_its_brew_bundle_and_mise_install_steps() {
   assert_status 0
   local log
   log=$(apply_log_path)
-  assert_contains "$out" "==> brew bundle (output in $log)"
+  assert_contains "$out" "==> brew bundle, the state repo's Brewfile (output in $log)"
   assert_contains "$out" "==> mise install (output in $log)"
   assert_contains "$out" "Installing tree"
   assert_contains "$out" "Upgrading wget"
@@ -59,7 +59,7 @@ test_apply_stops_when_brew_bundle_fails() {
   export STUB_BREW_BUNDLE_FAILS=1
   run_tty y -- "$tool" apply
   assert_status 1
-  assert_order "$out" "Failed, exit status 1:" "Error: the bundle failed" "macelium apply: stopped: brew bundle failed"
+  assert_order "$out" "Failed, exit status 1:" "Error: the bundle failed" "macelium apply: stopped: brew bundle, the state repo's Brewfile failed"
   assert_contains "$(apply_log_path)" "Error: the bundle failed"
   assert_not_contains "$STUB_LOG" "mise -C $HOME install"
   assert_not_contains "$out" "Apply complete"

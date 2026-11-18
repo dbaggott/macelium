@@ -456,3 +456,15 @@ test_bootstrap_says_nothing_of_filevault_when_on_or_unknown() {
   assert_contains "$out" "STUB chezmoi init"
   assert_not_contains "$out" "FileVault"
 }
+
+# The plan at the end.
+
+test_bootstrap_says_where_unlisted_packages_came_from_only_when_there_are_some() {
+  make_state macelium.conf $'contract 1\n' Brewfile $'brew "hello"\n'
+  run_tty -- "$tool" bootstrap "$state"
+  assert_order "$out" "==> Differences from the state repo (macelium plan)" "No changes. This machine matches the state repo." "Steps:"
+  assert_not_contains "$out" "before the bootstrap"
+  export STUB_BREW_UNLISTED=extra
+  run_tty -- "$tool" bootstrap "$state"
+  assert_order "$out" "Homebrew: installed but not listed" "They were on this Mac before the bootstrap" "formula extra"
+}

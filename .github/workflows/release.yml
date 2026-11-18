@@ -130,6 +130,8 @@ jobs:
 
             def install
               bin.install "macelium"
+              bash_completion.install "completions/macelium.bash" => "macelium"
+              zsh_completion.install "completions/_macelium"
             end
 
             service do
