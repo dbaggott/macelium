@@ -14,6 +14,12 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## Unreleased
+
+- `bootstrap`'s banner spells dnbg's name, a letter every few columns, into
+  one of the mycelium's threads as it spreads, and leaves a blank line after
+  macelium's name before the messages that follow.
+
 ## 0.5.0
 
 - `macelium init` and `macelium bootstrap` refuse, exit 1, before changing
