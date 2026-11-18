@@ -17,18 +17,19 @@ passed=0 failed=()
 results=$(mktemp -d)
 trap 'rm -rf "$results"' EXIT
 
-# Takes a test file and the name of a test in it. Runs the test, keeping its
-# output in $results/<name>, and marks a pass with $results/<name>.ok.
+# Takes the test's place in the run, its file and its name. Runs the test,
+# keeping its output in $results/<place>, and marks a pass with
+# $results/<place>.ok.
 run_test() {
   if (
     # shellcheck source=/dev/null
     source "$tests_dir/lib.sh"
     # shellcheck source=/dev/null
-    source "$1"
+    source "$2"
     setup_sandbox
-    "$2"
-  ) >"$results/$2" 2>&1 </dev/null; then
-    : >"$results/$2.ok"
+    "$3"
+  ) >"$results/$1" 2>&1 </dev/null; then
+    : >"$results/$1.ok"
   fi
 }
 export -f run_test
@@ -43,12 +44,13 @@ for file in "$tests_dir"/test_*.sh; do
 done
 
 for i in ${names[@]+"${!names[@]}"}; do
-  printf '%s\0%s\0' "${files[i]}" "${names[i]}"
-done | xargs -0 -n 2 -P "$jobs" "$BASH" -c 'run_test "$@"' _
+  printf '%s\0%s\0%s\0' "$i" "${files[i]}" "${names[i]}"
+done | xargs -0 -n 3 -P "$jobs" "$BASH" -c 'run_test "$@"' _
 
-for name in ${names[@]+"${names[@]}"}; do
-  cat "$results/$name"
-  if [[ -e $results/$name.ok ]]; then
+for i in ${names[@]+"${!names[@]}"}; do
+  name=${names[i]}
+  cat "$results/$i"
+  if [[ -e $results/$i.ok ]]; then
     echo "ok: $name"
     ((passed++))
   else
