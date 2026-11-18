@@ -279,9 +279,12 @@ left to `brew bundle` with the rest. When
 **`bootstrap`** sets up a machine from `<checkout>`, which must hold
 `macelium.conf`, or else from the checkout chezmoi's config names. It can run
 again at any point after. It opens with a banner of mycelium spreading and
-fruiting, in color unless `NO_COLOR` is set, then checks what it needs from
+fruiting, in color unless `NO_COLOR` is set, then refuses a chezmoi setup
+that is not macelium's, as `init` does (below). It checks what it needs from
 macOS, App Management and Full Disk Access for the terminal, and stops naming
-each that is missing. It then asks for sudo once for its own steps, prints
+each that is missing. When `fdesetup status` says FileVault is off, it warns,
+since FileVault is what protects the state repo's files on the Mac at rest,
+and goes on. It then asks for sudo once for its own steps, prints
 the manifest's `init_notes` when the machine has no chezmoi config, runs
 `chezmoi init`, and applies the files. Each chezmoi script, and each of
 `apply`'s steps, then runs as its own step, so one that fails stops none
@@ -295,7 +298,21 @@ It needs a terminal.
 
 **`init`** captures this Mac into a new state repo at `<path>`, which must
 be missing or an empty directory: otherwise it exits 1, having written
-nothing. It writes [`example/`](example/)'s layout, at the contract this
+nothing.
+
+Both `init` and `bootstrap` refuse, exit 1, before changing anything, a Mac
+with a chezmoi setup that is not macelium's: a chezmoi config file under
+`~/.config/chezmoi/` whose source is not in a checkout with `macelium.conf`
+at its root, or, with no config file, a `~/.local/share/chezmoi` that is not
+empty. A config naming a macelium checkout, at any path, passes.
+`bootstrap`'s `chezmoi init` would replace that config. macelium manages
+chezmoi itself, so to switch to it, save the old source if it holds anything
+not saved elsewhere, keep a copy of any `age` or `gpg` key file, run
+`chezmoi purge`, which removes chezmoi's config, state and source and leaves
+the files it manages in place, and run the command again. Those files are
+what `init` captures.
+
+`init` writes [`example/`](example/)'s layout, at the contract this
 macelium knows:
 
 - `macelium.conf`, `.chezmoiroot` naming `home`, a `macos.sh` holding only a comment, and

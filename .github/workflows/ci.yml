@@ -65,6 +65,16 @@ jobs:
 
           script -q /dev/null "$GITHUB_WORKSPACE/macelium" bootstrap "$state" </dev/null
 
+          # Again, now that the first run has written a real chezmoi config,
+          # which names this checkout through its .chezmoiroot directory: the
+          # refusal of a chezmoi setup that is not macelium's must pass it.
+          again="$RUNNER_TEMP/bootstrap-again.log"
+          script -q /dev/null "$GITHUB_WORKSPACE/macelium" bootstrap "$state" </dev/null | tee "$again"
+          if grep -qF "chezmoi setup that is not macelium's" "$again"; then
+            echo "the second bootstrap refused the chezmoi config the first wrote"
+            exit 1
+          fi
+
           # The greeting is a template reading home/.chezmoidata.toml.
           [[ $(cat ~/.config/macelium-example/greeting) == "hello from the macelium example" ]]
 

@@ -1,0 +1,7 @@
+#!/bin/bash
+# Records the call. status prints $STUB_FDESETUP_STATUS, by default that
+# FileVault is on, and fails when $STUB_FDESETUP_FAILS is set.
+echo "fdesetup $*" >>"$STUB_LOG"
+[[ -z ${STUB_FDESETUP_FAILS:-} ]] || exit 1
+[[ ${1:-} == status ]] && printf '%s\n' "${STUB_FDESETUP_STATUS:-FileVault is On.}"
+exit 0
