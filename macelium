@@ -2163,15 +2163,19 @@ banner_stages=(
   "    .-~~~~~-.    ;  .'  o      '.  ; /         o   \\ ;(_______________);       | |       ;       | |       "
 )
 
+# The name the banner's mycelium spells as it spreads.
+banner_signature=dnbg
+
 # Plays the banner on the terminal: a spore drifts down onto a ground line,
-# mycelium spreads from it below the line, then mushrooms fruit above it, and
-# macelium's name follows. It is 64 columns by 15 rows, in color unless
-# NO_COLOR is set, and a smaller terminal gets none. Each frame redraws the
-# last by moving up over it.
+# mycelium spreads from it below the line, spelling banner_signature into
+# a thread, then mushrooms fruit above it, and macelium's name follows, and a
+# blank line. It is 64 columns by 15 rows, in color unless NO_COLOR is set,
+# and a smaller terminal gets none. Each frame redraws the last by moving up
+# over it.
 print_banner() {
   local width=64 rows=12 ground=6 grid=() kind=() blank='' surface='' drawn=no
   local tip_r=() tip_c=() tip_d=() tip_v=() i r c d n nr nc ch dr step tick s
-  local site_col site_max site_delay size exit_trap
+  local site_col site_max site_delay size exit_trap letters=$banner_signature letter_at
   local st_g='' st_h='' st_t='' st_s='' st_c='' st_d='' st_w='' st_0=''
   size=$(terminal_size)
   ((${size% *} >= rows + 3 && ${size#* } >= width)) || return 0
@@ -2212,6 +2216,7 @@ print_banner() {
   # through the soil. The spread ends when both leaders reach the edges.
   tip_r=($((ground + 1)) $((ground + 1))) tip_c=("$c" "$c") tip_d=(-1 1)
   tip_v=($((RANDOM % 2)) $((RANDOM % 2)))
+  letter_at=$((c + 3))
   for ((step = 0; step < 3 * width; step++)); do
     n=${#tip_r[@]}
     for ((i = 0; i < n; i++)); do
@@ -2241,7 +2246,12 @@ print_banner() {
       else
         case $((RANDOM % 4)) in 0) ch='~' ;; 1) ch='.' ;; *) ch='-' ;; esac
       fi
-      banner_put "$nr" "$nc" "$ch" t
+      # The right leader spells the signature into its thread as it grows, a
+      # letter every few columns, and no thread draws over one.
+      if ((i == 1 && dr == 0 && ${#letters} && nc >= letter_at)); then
+        ch=${letters:0:1} letters=${letters:1} letter_at=$((nc + 2 + RANDOM % 3))
+      fi
+      [[ ${grid[nr]:nc:1} == [$banner_signature] ]] || banner_put "$nr" "$nc" "$ch" t
       tip_r[i]=$nr tip_c[i]=$nc
       if ((${#tip_r[@]} < 20 && RANDOM % 6 == 0)); then
         tip_r+=("$nr") tip_c+=("$nc") tip_d+=("$d")
@@ -2284,7 +2294,7 @@ print_banner() {
     banner_frame 0.11
   done
 
-  printf '\n%24s%s%s%s\n' '' "$st_w" 'm a c e l i u m' "$st_0"
+  printf '\n%24s%s%s%s\n\n' '' "$st_w" 'm a c e l i u m' "$st_0"
   printf '\033[?25h'
   eval "${exit_trap:-trap - EXIT}"
 }

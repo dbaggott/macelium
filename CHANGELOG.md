@@ -16,6 +16,9 @@ contract than its own.
 
 ## 0.6.0
 
+- `bootstrap`'s banner spells dnbg's name, a letter every few columns, into
+  one of the mycelium's threads as it spreads, and leaves a blank line after
+  macelium's name before the messages that follow.
 - `install.sh` with no argument finds or creates your state repo: it asks
   whether it is on GitHub or another git host, looks for
   `<username>/macelium-state` on GitHub, first without a sign-in, and asks
