@@ -21,6 +21,8 @@ trap 'rm -rf "$results"' EXIT
 # its file and its name. Runs the test, keeping its output in
 # <results>/<place>, then its exit status in <results>/<place>.status.
 run_test() {
+  # xargs's bash starts without this script's options.
+  set -uo pipefail
   (
     # shellcheck source=/dev/null
     source "$1"
