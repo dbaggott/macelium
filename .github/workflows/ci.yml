@@ -95,7 +95,12 @@ jobs:
       # expect answers install.sh's prompts by their text: under script, only
       # the first read of the terminal gets end-of-file. It declines the
       # GitHub sign-in, which would open a browser. A prompt it doesn't know
-      # fails the run after five minutes with no output.
+      # fails the run after five minutes with no output. Its last pattern
+      # takes each line's text up to a carriage return or newline, so any
+      # output restarts the timeout, the status line's spinner frames
+      # included, while a prompt, which ends with no line break, waits for
+      # its own pattern. It leaves the line break in the buffer, where the
+      # patterns that start with \n need it.
       - name: Install from the example with install.sh, then again
         timeout-minutes: 15
         env:
@@ -125,6 +130,7 @@ jobs:
               spawn bash install.sh macelium-ci/example
               expect {
                 "so you can push changes from this machine?" { send "n\r"; exp_continue }
+                -re {[^\r\n]+(?=[\r\n])} { exp_continue }
                 timeout { puts "\nexpect: no output for 300s, so a prompt it does not know is waiting"; exit 1 }
                 eof
               }
@@ -156,6 +162,10 @@ jobs:
         timeout-minutes: 30
         env:
           HOMEBREW_NO_ASK: 1
+          # A1's Brewfile is the runner's own, so its bootstrap would upgrade
+          # each of the runner's outdated packages, browsers included, which
+          # tests nothing of macelium's.
+          HOMEBREW_BUNDLE_NO_UPGRADE: 1
         run: |
           set -euo pipefail
 
@@ -174,6 +184,7 @@ jobs:
                 -re {\nEmail( \[[^]]*\])?: } { send "ci@example.com\r"; exp_continue }
                 -re {Capture ~/[^\r\n]*\? \[Y/n\] } { send "y\r"; exp_continue }
                 -ex {out of the state repo? [Y/n] } { send "y\r"; exp_continue }
+                -re {[^\r\n]+(?=[\r\n])} { exp_continue }
                 timeout { puts "\nexpect: no output for 300s, so a prompt it does not know is waiting"; exit 1 }
                 eof
               }
