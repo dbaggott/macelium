@@ -1850,11 +1850,11 @@ start_sudo() {
   fi
   echo
   sudo -v || return 1
-  # -v runs no command. sudo runs a command in a pty of its own and relays the
-  # terminal's input to it, so a command here would take a step's input, such
-  # as a terminal's answer to chezmoi's query, which it then echoes.
+  # -v refreshes the credentials without running a command: sudo runs a
+  # command in a pty of its own and relays the terminal's input to it, away
+  # from the step reading the terminal.
   while kill -0 "$$" 2>/dev/null; do
-    sudo -n -v </dev/null >/dev/null 2>&1
+    sudo -n -v 2>/dev/null
     sleep 50
   done &
   keeper=$!
