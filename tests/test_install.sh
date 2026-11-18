@@ -48,13 +48,20 @@ STUB
 
 test_install_refuses_without_a_repo() {
   local args
-  for args in "" "state" "example/state/extra" "example/" "example/state $sandbox/a $sandbox/b" \
+  for args in "state" "example/state/extra" "example/" "example/state $sandbox/a $sandbox/b" \
     https://github.com/example/state/extra git@github.com:example https://git.example.org/ ftp://git.example.org/me/state; do
     # shellcheck disable=SC2086 # each case is its words
     run_installer $args
     assert_status 1
     assert_contains "$err" "usage: curl -fsSL"
   done
+}
+
+test_install_with_no_argument_needs_a_terminal() {
+  run_installer
+  assert_status 1
+  assert_contains "$err" "install.sh: needs a terminal for its prompts"
+  [[ ! -s $STUB_LOG ]] || fail "it ran: $(cat "$STUB_LOG")"
 }
 
 test_install_refuses_a_path_holding_something_else() {
