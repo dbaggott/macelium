@@ -14,11 +14,19 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
-## Unreleased
+## 0.6.0
 
 - `bootstrap`'s banner spells dnbg's name, a letter every few columns, into
   one of the mycelium's threads as it spreads, and leaves a blank line after
   macelium's name before the messages that follow.
+- `install.sh` with no argument finds or creates your state repo: it asks
+  whether it is on GitHub or another git host, looks for
+  `<username>/macelium-state` on GitHub, first without a sign-in, and asks
+  the path. With a state repo, it clones and bootstraps it. With none, or an
+  empty one, it captures this Mac with `macelium init`, creates the repo on
+  GitHub with `gh repo create`, private by default, or pushes to the empty
+  one, and bootstraps. Run again, it picks up where it stopped. The README's
+  "Install" leads with it; naming the repo still works as before.
 
 ## 0.5.0
 
