@@ -4,6 +4,7 @@
 # macelium.conf at its root, naming its Brewfile, settings list and apps
 # directory (README.md, "The state repo").
 #
+#   macelium init [--public] <path>
 #   macelium bootstrap [<checkout>]
 #   macelium plan [--notify]
 #   macelium apply
@@ -40,6 +41,12 @@
 # that fails stops none after it, with the output in its log. It ends with the
 # plan, each step's result, and the manual steps.
 #
+# init captures this Mac into a new state repo at a path that is missing or
+# empty: example/'s layout, a Brewfile from brew bundle dump, the name and
+# email it asks for, and, each on a yes, ~/.gitconfig, ~/.zshrc and the mise
+# config, offering to move lines that look like secrets to ~/.gitconfig.local
+# and ~/.zshrc.local. It commits once, and neither pushes nor bootstraps.
+#
 # settings writes the macOS settings that differ from the list, the state
 # repo's unless --file names another, without asking, and restarts the apps
 # that read them.
@@ -54,7 +61,7 @@
 set -uo pipefail
 
 # A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.3.1"
+VERSION="0.4.0"
 # How brew bundle check names macelium in a state repo's Brewfile, whose line
 # for it README.md ("The Brewfile's macelium line") gives.
 self_formula=dbaggott/tap/macelium
@@ -2381,8 +2388,256 @@ bootstrap() {
   print_outcome "Bootstrap complete"
 }
 
+# --- init -------------------------------------------------------------------
+
+# The line a captured ~/.zshrc ends with, and the section a captured
+# ~/.gitconfig ends with, so that each machine's own differences load last
+# (README.md, "Person values and machine differences").
+zshrc_local_line='[[ -r ~/.zshrc.local ]] && source ~/.zshrc.local'
+gitconfig_local_section=$'[include]\n\tpath = ~/.gitconfig.local'
+
+# Takes the question and its default, which may be empty. Asks on the
+# terminal, again while the reply and the default are both empty, and prints
+# the reply, or the default for an empty one. End-of-file on an empty reply
+# gives the default, and fails when there is none; after a partly typed
+# reply, it fails.
+ask_value() {
+  local question=$1 answer
+  [[ -n $2 ]] && question="$1 [$2]"
+  while true; do
+    answer=''
+    printf '%s: ' "$question" >/dev/tty
+    if ! read -r answer </dev/tty; then
+      printf '\n' >/dev/tty
+      [[ -z $answer && -n $2 ]] || return 1
+      answer=$2
+    fi
+    [[ -n $answer ]] || answer=$2
+    if [[ -n $answer ]]; then
+      printf '%s\n' "$answer"
+      return 0
+    fi
+  done
+}
+
+# Takes a string. Prints it as a TOML basic string.
+toml_string() {
+  local s=${1//\\/\\\\}
+  s=${s//\"/\\\"}
+  printf '"%s"' "$s"
+}
+
+# Prints this Mac's formulae, casks and taps as a Brewfile, with macelium's
+# line as README.md ("The Brewfile's macelium line") gives it, in place of the
+# one brew bundle dump writes, or last when it writes none.
+init_brewfile() {
+  local dump line found=no
+  local own="brew \"$self_formula\", trusted: true, restart_service: :always"
+  dump=$(brew bundle dump --formula --cask --tap --file=-) || return 1
+  if [[ -n $dump ]]; then
+    while IFS= read -r line; do
+      if [[ $line == "brew \"$self_formula\""* ]]; then
+        line=$own found=yes
+      fi
+      printf '%s\n' "$line"
+    done <<<"$dump"
+  fi
+  [[ $found == yes ]] || printf '%s\n' "$own"
+}
+
+# Takes zshrc or gitconfig, and the file. Prints the numbers of its lines that
+# look like secrets, one a line: in either, a value starting with a known
+# token prefix, or a URL with credentials; in a zshrc, an export of a name
+# that holds TOKEN, SECRET, KEY or PASSWORD; in a gitconfig, an extraHeader.
+secret_lines() {
+  {
+    grep -nE '(^|[^[:alnum:]_])(ghp_|github_pat_|sk-|AKIA|xox)|://[^/@[:space:]]+:[^/@[:space:]]+@' "$2"
+    if [[ $1 == zshrc ]]; then
+      grep -nE '^[[:space:]]*export[[:space:]]+[[:alnum:]_]*(TOKEN|SECRET|KEY|PASSWORD)[[:alnum:]_]*=' "$2"
+    else
+      grep -niE '^[[:space:]]*extraheader[[:space:]]*=' "$2"
+    fi
+  } | cut -d : -f 1 | sort -nu
+}
+
+# Takes kept or moved, the numbers of the lines to move, one a line, 1 when
+# the file is a gitconfig, and the file. Prints the file without those lines,
+# or those lines alone. In a gitconfig, a moved line comes with its section's
+# header, and a moved header takes its whole section with it.
+split_lines() {
+  awk -v want="$1" -v numbers="${2//$'\n'/,}" -v sections="$3" '
+    BEGIN {
+      n = split(numbers, list, ",")
+      for (i = 1; i <= n; i++) if (list[i] != "") move[list[i]] = 1
+    }
+    {
+      is_header = sections && /^[[:space:]]*\[/
+      if (is_header) { header = $0; shown = 0; whole = (FNR in move) }
+      moving = (FNR in move) || (sections && whole)
+      if (want == "kept") { if (!moving) print; next }
+      if (!moving) next
+      if (sections && !is_header && header != "" && !shown) print header
+      print
+      shown = 1
+    }
+  ' "$4"
+}
+
+# Takes a gitconfig on stdin. Prints it as a chezmoi template: its [user]
+# name and email read the state repo's values, any {{ in it stays literal,
+# and it ends with the section that includes ~/.gitconfig.local, unless it
+# already does.
+gitconfig_template() {
+  local template
+  template=$(awk '
+    { gsub(/[{][{]/, "{{ \"{{\" }}") }
+    /^[[:space:]]*\[/ { user = (tolower($0) ~ /^[[:space:]]*\[user\][[:space:]]*$/); print; next }
+    user && match(tolower($0), /^[[:space:]]*name[[:space:]]*=/) { print substr($0, 1, RLENGTH) " {{ .name }}"; next }
+    user && match(tolower($0), /^[[:space:]]*email[[:space:]]*=/) { print substr($0, 1, RLENGTH) " {{ .email }}"; next }
+    { print }
+  ')
+  if [[ $(grep -v '^[[:space:]]*$' <<<"$template" | tail -n 2) == "$gitconfig_local_section" ]]; then
+    printf '%s\n' "$template"
+  else
+    printf '%s\n\n%s\n' "$template" "$gitconfig_local_section"
+  fi
+}
+
+# Takes the file's path under the home directory, whether the state repo is
+# public, and anything more to say. Shows the file and asks whether to
+# capture it.
+offer_capture() {
+  local where='and will be published if the repo is public'
+  [[ $2 == yes ]] && where='and will be published with it, since the repo is public'
+  printf '\n==> ~/%s\n' "$1"
+  cat "$HOME/$1"
+  printf '\n~/%s goes into the state repo, %s.\n' "$1" "$where"
+  [[ -z ${3:-} ]] || printf '%s\n' "$3"
+  confirm "Capture ~/$1?" yes
+}
+
+# Takes zshrc or gitconfig, the file's path under the home directory, and its
+# .local file's. Lists the file's lines that look like secrets, and offers to
+# move them to the .local file. Sets capture_kept to the file as it goes into the state
+# repo, and capture_moved to the lines moved.
+offer_move() {
+  local numbers sections=0 moved
+  [[ $1 == gitconfig ]] && sections=1
+  local file=$HOME/$2
+  capture_kept=$(cat "$file") capture_moved=''
+  numbers=$(secret_lines "$1" "$file")
+  [[ -n $numbers ]] || return 0
+  moved=$(split_lines moved "$numbers" "$sections" "$file")
+  echo "These lines look like secrets:"
+  printf '  %s\n' "${moved//$'\n'/$'\n'  }"
+  if confirm "Move them to ~/$3, kept on this Mac only and out of the state repo?" yes; then
+    capture_moved=$moved
+    capture_kept=$(split_lines kept "$numbers" "$sections" "$file")
+  fi
+}
+
+# Takes a .local file and the lines to add to it. Appends them, leaving the
+# file mode 0600, since they look like secrets.
+append_local() {
+  [[ -n $2 ]] || return 0
+  (umask 077 && printf '%s\n' "$2" >>"$1") && chmod 600 "$1"
+}
+
+# Takes [--public] and the path. Captures this Mac into a new state repo at
+# the path, a git repo with one commit and no remote (README.md, "Commands").
+init_command() {
+  local public=no path
+  if [[ ${1:-} == --public ]]; then
+    public=yes
+    shift
+  fi
+  (($# == 1)) || usage
+  path=$1
+  if [[ -e $path && ! -d $path ]] || [[ -d $path && -n $(ls -A "$path") ]]; then
+    echo "macelium init: $path exists and is not empty: name a new or empty directory" >&2
+    return 1
+  fi
+
+  local default_name default_email user name email
+  default_name=$(git config --global --includes user.name)
+  default_email=$(git config --global --includes user.email)
+  if [[ -z $default_name || -z $default_email ]] && command -v gh >/dev/null &&
+    gh auth status >/dev/null 2>&1 && user=$(gh api user 2>/dev/null); then
+    [[ -n $default_name ]] || default_name=$(jq -r '.name // empty' <<<"$user")
+    [[ -n $default_email ]] ||
+      default_email=$(jq -r 'if .id and .login then "\(.id)+\(.login)@users.noreply.github.com" else empty end' <<<"$user")
+  fi
+  echo "Your name and email go into the state repo, for every machine's git config, and author its first commit."
+  if ! name=$(ask_value Name "$default_name") || ! email=$(ask_value Email "$default_email"); then
+    echo "macelium init: no answer, so nothing was written" >&2
+    return 1
+  fi
+
+  local brewfile
+  printf '\n==> brew bundle dump --formula --cask --tap\n'
+  if ! brewfile=$(init_brewfile); then
+    echo "macelium init: brew bundle dump failed, so nothing was written" >&2
+    return 1
+  fi
+
+  local capture_kept capture_moved
+  local gitconfig='' zshrc='' mise='' gitconfig_moved='' zshrc_moved=''
+  if [[ -f $HOME/.gitconfig ]] && offer_capture .gitconfig "$public"; then
+    offer_move gitconfig .gitconfig .gitconfig.local
+    gitconfig=$(gitconfig_template <<<"$capture_kept") gitconfig_moved=$capture_moved
+  fi
+  if [[ -f $HOME/.zshrc ]] && offer_capture .zshrc "$public" \
+    'Secrets are better kept in a password manager or the Keychain, read by the command that needs them.'; then
+    offer_move zshrc .zshrc .zshrc.local
+    zshrc=$capture_kept zshrc_moved=$capture_moved
+    [[ $(grep -v '^[[:space:]]*$' <<<"$zshrc" | tail -n 1) == "$zshrc_local_line" ]] ||
+      zshrc+=$'\n'$zshrc_local_line
+  fi
+  if [[ -f $HOME/.config/mise/config.toml ]] &&
+    offer_capture .config/mise/config.toml "$public"; then
+    mise=$(cat "$HOME/.config/mise/config.toml")
+  fi
+
+  local home=$path/home
+  # shellcheck disable=SC2016 # the template's, not the shell's
+  if ! {
+    mkdir -p "$home" &&
+      printf '%s\n' '# The manifest: https://github.com/dbaggott/macelium#the-manifest' "contract $known_contract" >"$path/macelium.conf" &&
+      printf 'home\n' >"$path/.chezmoiroot" &&
+      printf '%s\n' "$brewfile" >"$path/Brewfile" &&
+      printf '%s\n' '# The macOS settings every machine has, a declaration a line:' \
+        '# https://github.com/dbaggott/macelium#the-settings-list' >"$path/macos.sh" &&
+      printf '%s\n' '{{- /* macelium finds the state repo through chezmoi source-path, so the' \
+        '       config names this checkout as chezmoi'\''s source. */ -}}' \
+        'sourceDir = {{ .chezmoi.workingTree | quote }}' >"$home/.chezmoi.toml.tmpl" &&
+      printf '%s\n' '# Values every machine shares, which templates read as {{ .name }} and' \
+        '# {{ .email }}. One machine'\''s differences go in ~/.gitconfig.local and' \
+        '# ~/.zshrc.local, never here.' \
+        "name = $(toml_string "$name")" "email = $(toml_string "$email")" >"$home/.chezmoidata.toml" &&
+      { [[ -z $gitconfig ]] || printf '%s\n' "$gitconfig" >"$home/dot_gitconfig.tmpl"; } &&
+      { [[ -z $zshrc ]] || printf '%s\n' "$zshrc" >"$home/dot_zshrc"; } &&
+      { [[ -z $mise ]] || { mkdir -p "$home/dot_config/mise" && printf '%s\n' "$mise" >"$home/dot_config/mise/config.toml"; }; } &&
+      git init -q -b main "$path" &&
+      git -C "$path" add -A &&
+      git -C "$path" -c user.name="$name" -c user.email="$email" -c commit.gpgsign=false \
+        commit -q --no-verify -m 'Capture this Mac with macelium init'
+  }; then
+    echo "macelium init: writing $path failed: remove it and run macelium init again" >&2
+    return 1
+  fi
+  if ! append_local "$HOME/.gitconfig.local" "$gitconfig_moved" || ! append_local "$HOME/.zshrc.local" "$zshrc_moved"; then
+    echo "macelium init: moving the secrets to the .local files failed; they stay in ~/.gitconfig and ~/.zshrc, and out of the state repo" >&2
+    return 1
+  fi
+
+  printf '\nState repo: %s, with one commit and no remote.\n' "$path"
+  [[ -z $gitconfig_moved ]] || echo "Moved lines that look like secrets to ~/.gitconfig.local."
+  [[ -z $zshrc_moved ]] || echo "Moved lines that look like secrets to ~/.zshrc.local."
+  echo "Next, push it to a new repo, then run macelium bootstrap $path."
+}
+
 usage() {
-  echo "usage: macelium bootstrap [<checkout>] | macelium plan [--notify] | macelium apply | macelium settings [--file <path>] | macelium --version" >&2
+  echo "usage: macelium init [--public] <path> | macelium bootstrap [<checkout>] | macelium plan [--notify] | macelium apply | macelium settings [--file <path>] | macelium --version" >&2
   exit 1
 }
 
@@ -2390,6 +2645,10 @@ usage() {
 [[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 
 case "${1:-}" in
+  init)
+    shift
+    init_command "$@"
+    ;;
   bootstrap)
     shift
     (($# <= 1)) || usage

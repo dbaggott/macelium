@@ -4,8 +4,12 @@
 # a line as brew bundle check names it ("Formula <name>"), as having an upgrade; every other check finds
 # nothing. A plain `bundle --file=<path>` prints $STUB_BREW_BUNDLE_OUTPUT, then fails when
 # $STUB_BREW_BUNDLE_FAILS is set. `upgrade` fails when $STUB_BREW_UPGRADE_FAILS is set, `--prefix` prints
-# $STUB_BREW_PREFIX, and `--cache` prints $STUB_BREW_CACHE.
+# $STUB_BREW_PREFIX, `--cache` prints $STUB_BREW_CACHE, and `bundle dump` prints $STUB_BREW_DUMP.
 echo "brew $*" >>"$STUB_LOG"
+if [[ ${1:-} == bundle && ${2:-} == dump ]]; then
+  [[ -n ${STUB_BREW_DUMP:-} ]] && printf '%s\n' "$STUB_BREW_DUMP"
+  exit 0
+fi
 for arg in "$@"; do
   if [[ $arg == --file=- ]]; then cat >/dev/null; fi
 done
