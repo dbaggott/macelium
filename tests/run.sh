@@ -2,7 +2,7 @@
 # Runs every test_* function in tests/test_*.sh, each in a subshell of its own
 # with a fresh sandbox (tests/lib.sh), several at once, and exits 1 if any
 # failed. Each test's output is printed whole, above its result, in the order
-# the tests are found.
+# the tests are found, once it and every test before it have ended.
 #
 # Usage: tests/run.sh [<name pattern>]
 set -uo pipefail
@@ -17,23 +17,20 @@ passed=0 failed=()
 results=$(mktemp -d)
 trap 'rm -rf "$results"' EXIT
 
-# Takes the test's place in the run, its file and its name. Runs the test,
-# keeping its output in $results/<place>, and marks a pass with
-# $results/<place>.ok.
+# Takes lib.sh, the directory for results, and the test's place in the run,
+# its file and its name. Runs the test, keeping its output in
+# <results>/<place>, then its exit status in <results>/<place>.status.
 run_test() {
-  if (
+  (
     # shellcheck source=/dev/null
-    source "$tests_dir/lib.sh"
+    source "$1"
     # shellcheck source=/dev/null
-    source "$2"
+    source "$4"
     setup_sandbox
-    "$3"
-  ) >"$results/$1" 2>&1 </dev/null; then
-    : >"$results/$1.ok"
-  fi
+    "$5"
+  ) >"$2/$3" 2>&1 </dev/null
+  echo $? >"$2/$3.status.part" && mv "$2/$3.status.part" "$2/$3.status"
 }
-export -f run_test
-export tests_dir results
 
 files=() names=()
 for file in "$tests_dir"/test_*.sh; do
@@ -45,12 +42,23 @@ done
 
 for i in ${names[@]+"${!names[@]}"}; do
   printf '%s\0%s\0%s\0' "$i" "${files[i]}" "${names[i]}"
-done | xargs -0 -n 3 -P "$jobs" "$BASH" -c 'run_test "$@"' _
+done | xargs -0 -n 3 -P "$jobs" "$BASH" -c "$(declare -f run_test); run_test \"\$@\"" _ "$tests_dir/lib.sh" "$results" &
+runner=$!
 
 for i in ${names[@]+"${!names[@]}"}; do
   name=${names[i]}
-  cat "$results/$i"
-  if [[ -e $results/$i.ok ]]; then
+  # Once xargs has ended, a test with no status is one it never started.
+  while [[ ! -e $results/$i.status ]] && kill -0 "$runner" 2>/dev/null; do
+    sleep 0.1
+  done
+  if [[ -e $results/$i.status ]]; then
+    cat "$results/$i"
+    status=$(<"$results/$i.status")
+  else
+    echo "  never ran"
+    status=
+  fi
+  if [[ $status == 0 ]]; then
     echo "ok: $name"
     ((passed++))
   else
