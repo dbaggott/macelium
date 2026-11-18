@@ -71,6 +71,14 @@ test_banner_without_color_under_no_color() {
   if grep -qE $'\033\\[[0-9;]*m' "$out"; then fail "a color escape under NO_COLOR"; fi
 }
 
+test_banner_ends_on_a_blank_line() {
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner; echo after' _ "$tool"
+  assert_status 0
+  grep -A1 -F "m a c e l i u m" "$out" | tail -n 1 | grep -qx $'\r*' ||
+    fail "no blank line after the banner"
+}
+
 # What the bootstrap says before sudo asks.
 
 homebrew_asks_text='Homebrew will ask you to authenticate again'
