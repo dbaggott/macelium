@@ -14,6 +14,12 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.4.1
+
+- The status line's spinner is two mushrooms side by side, each growing and
+  falling over onto the other's spot, where its spore sprouts the next, so it
+  turns in a loop rather than growing and fading in place.
+
 ## 0.4.0
 
 - `macelium init [--public] <path>` captures this Mac into a new state repo:
