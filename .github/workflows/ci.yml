@@ -96,8 +96,8 @@ jobs:
       # the first read of the terminal gets end-of-file. It declines the
       # GitHub sign-in, which would open a browser. A prompt it doesn't know
       # fails the run after five minutes with no output. Its last pattern
-      # takes each line's text up to a carriage return or newline, so any
-      # output restarts the timeout, the status line's spinner frames
+      # takes each line's text up to a carriage return or newline, so each
+      # line of output restarts the timeout, the status line's spinner frames
       # included, while a prompt, which ends with no line break, waits for
       # its own pattern. It leaves the line break in the buffer, where the
       # patterns that start with \n need it.
@@ -162,10 +162,6 @@ jobs:
         timeout-minutes: 30
         env:
           HOMEBREW_NO_ASK: 1
-          # A1's Brewfile is the runner's own, so its bootstrap would upgrade
-          # each of the runner's outdated packages, browsers included, which
-          # tests nothing of macelium's.
-          HOMEBREW_BUNDLE_NO_UPGRADE: 1
         run: |
           set -euo pipefail
 
@@ -231,13 +227,16 @@ jobs:
           # captures the runner, the push, then the bootstrap. Afterwards
           # plan finds nothing to list in the Homebrew or files sections.
           # Upgrades available are left out: they follow Homebrew's
-          # releases, not what init captured.
+          # releases, not what init captured. Its runs skip brew bundle's
+          # upgrades: the Brewfile is the runner's own, so they would upgrade
+          # each of the runner's outdated packages, browsers included, which
+          # tests nothing of macelium's.
           remote="$RUNNER_TEMP/a1.git" url=https://git.example.com/ci/state.git
           git init -q --bare -b main "$remote"
           git config --global url."file://$remote".insteadOf "$url"
 
           a1="$RUNNER_TEMP/a1.log"
-          run_guided "$url" | tee "$a1"
+          HOMEBREW_BUNDLE_NO_UPGRADE=1 run_guided "$url" | tee "$a1"
           assert_lines "$a1" "macelium init $HOME/Developer/state" "Pushing $HOME/Developer/state to $url" \
             "macelium bootstrap $HOME/Developer/state"
           [[ -n $(git -C "$remote" for-each-ref) ]] || {
@@ -260,7 +259,7 @@ jobs:
           # A second run finds the repo pushed and the path its clone, so it
           # reaches the bootstrap with no init and no push.
           a1="$RUNNER_TEMP/a1-again.log"
-          run_guided "$url" | tee "$a1"
+          HOMEBREW_BUNDLE_NO_UPGRADE=1 run_guided "$url" | tee "$a1"
           assert_lines "$a1" "Clone: $HOME/Developer/state is already a clone of $url" "macelium bootstrap $HOME/Developer/state"
           for line in "macelium init" "Pushing"; do
             if grep -qF "==> $line" "$a1"; then
