@@ -257,8 +257,10 @@ install_macelium() {
     local refs view
     found=missing public=no
     if [[ $github == yes ]]; then
-      # With no credential helper, so a gh already signed in reads nothing.
-      if refs=$(GIT_TERMINAL_PROMPT=0 git -c credential.helper= ls-remote "https://github.com/$repo_path" 2>/dev/null); then
+      # With no credential helper, so a gh already signed in reads nothing,
+      # and not once this run has signed in, when gh can say.
+      if [[ $signed_in == no ]] &&
+        refs=$(GIT_TERMINAL_PROMPT=0 git -c credential.helper= ls-remote "https://github.com/$repo_path" 2>/dev/null); then
         public=yes found=refs
         [[ -n $refs ]] || found=empty
         return 0
