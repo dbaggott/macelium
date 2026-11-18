@@ -2893,7 +2893,7 @@ EOF
       cat <<'EOF'
 Show how this Mac differs from the state repo, changing nothing on it but a
 git fetch in the checkout and a brew update. Exits 0 when nothing differs,
-2 when anything does, and 1 when a check failed.
+2 when anything but an available upgrade does, and 1 when a check failed.
 
 Options:
   --notify    Print one log line, without the brew update, and post a macOS
