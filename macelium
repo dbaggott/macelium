@@ -61,7 +61,7 @@
 set -uo pipefail
 
 # A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.7.1"
+VERSION="0.7.2"
 # How brew bundle check names macelium in a state repo's Brewfile, whose line
 # for it README.md ("The Brewfile's macelium line") gives.
 self_formula=dbaggott/tap/macelium
@@ -1850,8 +1850,11 @@ start_sudo() {
   fi
   echo
   sudo -v || return 1
+  # -v runs no command. sudo runs a command in a pty of its own and relays the
+  # terminal's input to it, so a command here would take a step's input, such
+  # as a terminal's answer to chezmoi's query, which it then echoes.
   while kill -0 "$$" 2>/dev/null; do
-    sudo -n true 2>/dev/null
+    sudo -n -v </dev/null >/dev/null 2>&1
     sleep 50
   done &
   keeper=$!
