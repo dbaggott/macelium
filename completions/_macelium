@@ -1,0 +1,65 @@
+#compdef macelium
+# zsh completion for macelium, which the formula installs into Homebrew's
+# share/zsh/site-functions. tests/test_cli.sh checks it offers every command
+# and option macelium --help lists.
+
+_macelium() {
+  local curcontext=$curcontext state line ret=1
+  local -a commands
+  commands=(
+    'init:capture this Mac into a new state repo'
+    'bootstrap:set up this Mac from a state repo'
+    'plan:show how this Mac differs from the state repo'
+    'apply:bring this Mac in line with the state repo'
+    'settings:write the macOS settings that differ from the settings list'
+    'help:show the help for macelium or one of its commands'
+  )
+
+  _arguments -C \
+    '(- *)'{-h,--help}'[show the help]' \
+    '(- *)'{-V,--version}"[print macelium's version]" \
+    '1: :->command' \
+    '*:: :->argument' && ret=0
+
+  case $state in
+    command)
+      _describe -t commands 'macelium command' commands && ret=0
+      ;;
+    argument)
+      curcontext=${curcontext%:*:*}:macelium-$words[1]:
+      case $words[1] in
+        init)
+          _arguments \
+            '--public[say, when offering each file, that the repo will be public]' \
+            '(- *)'{-h,--help}'[show the help]' \
+            ':new state repo path:_directories' && ret=0
+          ;;
+        bootstrap)
+          _arguments \
+            '(- *)'{-h,--help}'[show the help]' \
+            ':state repo checkout:_directories' && ret=0
+          ;;
+        plan)
+          _arguments \
+            '--notify[print one log line and post a notification on drift]' \
+            '(- *)'{-h,--help}'[show the help]' && ret=0
+          ;;
+        apply)
+          _arguments \
+            '(- *)'{-h,--help}'[show the help]' && ret=0
+          ;;
+        settings)
+          _arguments \
+            "--file[read this settings list instead of the state repo's]:settings list:_files" \
+            '(- *)'{-h,--help}'[show the help]' && ret=0
+          ;;
+        help)
+          _describe -t commands 'macelium command' commands && ret=0
+          ;;
+      esac
+      ;;
+  esac
+  return ret
+}
+
+_macelium "$@"

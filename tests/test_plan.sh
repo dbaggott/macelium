@@ -41,3 +41,45 @@ test_plan_compares_a_setting_whose_domain_is_a_path() {
   assert_contains "$out" "$HOME/Library/Preferences/com.example.plist greeting: (not set) → hello"
   assert_contains "$STUB_LOG" "defaults export $HOME/Library/Preferences/com.example.plist -"
 }
+
+# The spinner while plan and apply check.
+
+test_with_spinner_turns_beside_its_label_and_keeps_what_the_command_sets() {
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty_raw 2 /bin/bash -c 'source "$1"; set_it() { sleep 0.5; it=set; }; with_spinner "Working it out" set_it; printf "[%s]\n" "$it"' \
+    _ "$tool"
+  assert_status 0
+  local raw
+  raw=$(cat "$out")
+  [[ $raw == *$'\r  '???' Working it out'* ]] || fail "no spinner frame was drawn beside the label"
+  [[ $raw == *$'\r\033[K[set]'* ]] || fail "the line was not cleared, or the command's variable was lost"
+}
+
+test_with_spinner_off_a_terminal_draws_nothing() {
+  # shellcheck source=/dev/null
+  source "$tool"
+  local status
+  with_spinner "Working it out" false >"$sandbox/out"
+  status=$?
+  ((status == 1)) || fail "with_spinner returned $status, not the command's 1"
+  [[ ! -s $sandbox/out ]] || fail "drew: $(cat "$sandbox/out")"
+}
+
+test_plan_on_a_terminal_shows_the_spinner_then_the_plan() {
+  make_state macelium.conf $'contract 1\n'
+  run_tty_raw 2 "$tool" plan
+  assert_status 0
+  local raw
+  raw=$(cat "$out")
+  [[ $raw == *' Comparing this machine with the state repo'* ]] || fail "no spinner while comparing"
+  [[ $raw == *$'\r\033[K'*'No changes. This machine matches the state repo.'* ]] || fail "the spinner's line was not cleared before the plan"
+}
+
+test_with_spinner_cuts_its_line_to_the_terminal_width_and_turns_in_place() {
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty_raw 2 /bin/bash -c 'stty cols 20; source "$1"; with_spinner "a label far wider than the terminal" sleep 0.5' _ "$tool"
+  assert_status 0
+  local raw
+  raw=$(cat "$out")
+  [[ $raw == *$'\r  '???' a label far w'$'\0337\r  '???$'\0338'* ]] || fail "the line was not cut to 19 columns, or no frame was drawn in place"
+}

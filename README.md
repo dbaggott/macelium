@@ -276,8 +276,20 @@ macelium bootstrap [<checkout>]
 macelium plan [--notify]
 macelium apply
 macelium settings [--file <path>]
+macelium help [<command>]
 macelium --version
 ```
+
+`macelium --help`, or `-h`, prints the commands, and `macelium <command>
+--help`, or `macelium help <command>`, a command's usage and options. A
+command given an argument it doesn't take names it, prints the command's
+usage, and exits 1.
+
+The formula installs completions for zsh and bash. zsh loads them from
+Homebrew's `share/zsh/site-functions`, which `brew shellenv` puts on
+`fpath`, when `compinit` runs after it in `~/.zshrc`. bash loads them when
+the startup files source `$(brew --prefix)/etc/profile.d/bash_completion.sh`,
+from the `bash-completion@2` formula.
 
 **`plan`** changes nothing on the machine but a `git fetch` in the checkout
 and, without `--notify`, a `brew update`, and never prompts. It prints every
@@ -296,6 +308,9 @@ It checks that:
 
 With `--notify`, it prints one log line in place of the sections, and posts a
 macOS notification when the exit status is not 0.
+
+**`plan`** and **`apply`** show a spinner while they fetch and compare, on a
+terminal.
 
 **`apply`** prints the plan and asks. On yes, it runs, in order:
 

@@ -4,12 +4,7 @@
 # macelium.conf at its root, naming its Brewfile, settings list and apps
 # directory (README.md, "The state repo").
 #
-#   macelium init [--public] <path>
-#   macelium bootstrap [<checkout>]
-#   macelium plan [--notify]
-#   macelium apply
-#   macelium settings [--file <path>]
-#   macelium --version
+# `macelium --help` gives each command's usage.
 #
 # plan changes nothing on the machine but a git fetch in the checkout and,
 # without --notify, a brew update, and never prompts. It prints every
@@ -178,6 +173,51 @@ count_lines() {
   fi
 }
 
+# Indents its input two spaces.
+indent() {
+  sed 's/^/  /'
+}
+
+# Takes a step's or a section's name, and prints it as a heading.
+print_heading() {
+  printf '\n==> %s\n' "$1"
+}
+
+timestamp() {
+  date +%Y-%m-%dT%H:%M:%S%z
+}
+
+# The command being run, set by the dispatch at the end, which its messages
+# name.
+subcommand=''
+
+# Takes a message, and prints it to stderr, naming the command.
+print_error() {
+  printf 'macelium%s: %s\n' "${subcommand:+ $subcommand}" "$1" >&2
+}
+
+# Takes why the command stopped, and prints it after the warnings, as its last
+# line.
+print_stopped() {
+  print_warnings
+  printf '\n' >&2
+  print_error "stopped: $1"
+}
+
+# Returns non-zero, having said why, unless stdin and stdout are a terminal.
+require_terminal() {
+  [[ -t 0 && -t 1 ]] && return 0
+  print_error "needs a terminal for its prompts"
+  return 1
+}
+
+# Takes a string, and prints it double-quoted, its backslashes and double
+# quotes escaped: a JSON string, or a TOML basic string.
+quoted_string() {
+  local s=${1//\\/\\\\}
+  printf '"%s"' "${s//\"/\\\"}"
+}
+
 # Takes whether to diff the targets chezmoi status lists.
 check_chezmoi() {
   local want_diff=$1 out status
@@ -242,22 +282,29 @@ find_checkout() {
   fi
 }
 
-# Takes the command, for its message. Changes nothing. Returns non-zero,
-# having said how to remove it, when this Mac has a chezmoi setup that is not
-# macelium's, whose config bootstrap's chezmoi init would replace: a config
-# file whose source is not in a checkout with macelium.conf at its root, or
-# no config file and a source directory that is not empty.
-refuse_foreign_chezmoi() {
-  local config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi
-  local source_dir=${XDG_DATA_HOME:-$HOME/.local/share}/chezmoi
-  local config found='' out reason
-  for config in "$config_dir"/chezmoi.{toml,yaml,json,jsonc}; do
+chezmoi_config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi
+
+# Prints the path of chezmoi's config file, and fails when there is none.
+chezmoi_config_file() {
+  local config
+  for config in "$chezmoi_config_dir"/chezmoi.{toml,yaml,json,jsonc}; do
     if [[ -e $config ]]; then
-      found=$config
-      break
+      printf '%s\n' "$config"
+      return 0
     fi
   done
-  if [[ -n $found ]]; then
+  return 1
+}
+
+# Changes nothing. Returns non-zero, having said how to remove it, when this
+# Mac has a chezmoi setup that is not macelium's, whose config bootstrap's
+# chezmoi init would replace: a config file whose source is not in a checkout
+# with macelium.conf at its root, or no config file and a source directory
+# that is not empty.
+refuse_foreign_chezmoi() {
+  local source_dir=${XDG_DATA_HOME:-$HOME/.local/share}/chezmoi
+  local found out reason
+  if found=$(chezmoi_config_file); then
     if ! out=$(chezmoi_checkout); then
       reason="$found names no source in a git checkout: $out"$'\n'"If it named a macelium checkout that has moved or been removed, run \`chezmoi init --source <checkout>\` to name the checkout instead."
     elif [[ ! -f $out/macelium.conf ]]; then
@@ -270,12 +317,12 @@ refuse_foreign_chezmoi() {
   else
     return 0
   fi
-  printf 'macelium %s: this Mac has a chezmoi setup that is not macelium'\''s: %s\n' "$1" "$reason" >&2
+  print_error "this Mac has a chezmoi setup that is not macelium's: $reason"
   printf '%s\n' '' "macelium manages chezmoi itself. To switch to macelium:" \
     "  1. Save the old chezmoi source if it holds anything not saved elsewhere, such as commits not pushed." \
-    "  2. Keep a copy of any age or gpg key file the old setup uses, such as one in $config_dir." \
+    "  2. Keep a copy of any age or gpg key file the old setup uses, such as one in $chezmoi_config_dir." \
     "  3. Run \`chezmoi purge\`, which removes chezmoi's config, state and source, and leaves the files it manages in place." \
-    "  4. Run macelium $1 again." \
+    "  4. Run macelium $subcommand again." \
     "The files left in place are what \`macelium init\` captures." >&2
   return 1
 }
@@ -778,6 +825,18 @@ sandbox_note() {
   esac
 }
 
+# Probes each sandboxed app, and sets macos_notes to why the settings of
+# those that were not compared were not, a line each.
+probe_sandboxes() {
+  local i note
+  macos_notes=''
+  for ((i = 0; i < ${#sandbox_domain[@]}; i++)); do
+    probe_sandbox "$i"
+    note=$(sandbox_note "$i")
+    [[ -n $note ]] && macos_notes+="${macos_notes:+$'\n'}$note"
+  done
+}
+
 # The EXIT trap export_domain sets, which an exec skips, so upgrade_self runs
 # it first.
 remove_export_dir() {
@@ -817,12 +876,6 @@ export_domain() {
   export_keys+=("$key")
 }
 
-# Takes a string, and prints it as a JSON string.
-json_string() {
-  local s=${1//\\/\\\\}
-  printf '"%s"' "${s//\"/\\\"}"
-}
-
 # Takes a setting's index, and prints its key, as the plan names it.
 setting_name() {
   local name="${setting_domain[$1]} ${setting_key[$1]}"
@@ -840,7 +893,7 @@ declared_value() {
     array | unordered-array)
       if [[ -n $value ]]; then
         while IFS= read -r v; do
-          json+="$sep$(json_string "$v")" sep=,
+          json+="$sep$(quoted_string "$v")" sep=,
         done <<<"$value"
       fi
       printf '[%s]\n' "$json"
@@ -906,7 +959,7 @@ compare_setting() {
 }
 
 check_macos() {
-  local list=$settings_file i sandbox note
+  local list=$settings_file i sandbox
   macos_detail='' macos_items='' macos_differing='' macos_notes=''
   # Each comparison exports afresh: apply's runs after chezmoi apply, whose
   # scripts may have written the keys.
@@ -926,11 +979,7 @@ check_macos() {
     macos_result=error
     return
   fi
-  for ((i = 0; i < ${#sandbox_domain[@]}; i++)); do
-    probe_sandbox "$i"
-    note=$(sandbox_note "$i")
-    [[ -n $note ]] && macos_notes+="${macos_notes:+$'\n'}$note"
-  done
+  probe_sandboxes
   for ((i = 0; i < ${#setting_key[@]}; i++)); do
     if sandbox=$(sandbox_index "${setting_domain[i]}") && [[ ${sandbox_state[sandbox]} != readable ]]; then
       continue
@@ -1074,7 +1123,7 @@ write_settings() {
   fi
   settings_written=yes
   echo "Writing:"
-  printf '%s\n' "$macos_items" | sed 's/^/  /'
+  printf '%s\n' "$macos_items" | indent
   for i in $macos_differing; do
     sandbox_index "${setting_domain[i]}" >/dev/null && continue
     if ! write_setting "$i"; then
@@ -1127,6 +1176,12 @@ apps_hooks() {
   done
 }
 
+# Takes a hook's path, and prints its app's name.
+hook_app() {
+  local app=${1%/after-apply}
+  printf '%s\n' "${app##*/}"
+}
+
 # Prints the combined hash of the hooks, the watches lists and the files they
 # name. Returns non-zero, with why printed, when git cannot list them.
 apps_hooks_hash() {
@@ -1156,7 +1211,7 @@ apps_hooks_hash() {
 }
 
 check_hooks() {
-  local hooks hash app names='' why
+  local hooks hash hook names='' why
   hooks_items='' hooks_detail=''
   if [[ ! -d $state_apps ]]; then
     hooks_result=skipped
@@ -1175,9 +1230,8 @@ check_hooks() {
     hooks_result=clean
     return
   fi
-  while IFS= read -r app; do
-    app=${app%/after-apply}
-    names+="${names:+, }${app##*/}"
+  while IFS= read -r hook; do
+    names+="${names:+, }$(hook_app "$hook")"
   done <<<"$hooks"
   why="a hook, or a file one watches, changed since they last ran"
   [[ -e $hooks_hash_file ]] || why="not run on this machine yet"
@@ -1196,8 +1250,7 @@ run_apps_hooks() {
   # command's, not the hooks after it.
   while IFS= read -r -u 3 hook; do
     [[ -n $hook ]] || continue
-    app=${hook%/after-apply}
-    app=${app##*/}
+    app=$(hook_app "$hook")
     printf '%s\n' "$app"
     bash "$hook" || failed+="${failed:+, }$app"
   done 3< <(apps_hooks)
@@ -1308,7 +1361,7 @@ plan_status() {
 print_section() {
   [[ -n $2 ]] || return 0
   printf '\n%s\n' "$1"
-  printf '%s\n' "$2" | sed 's/^/  /'
+  printf '%s\n' "$2" | indent
 }
 
 # Takes a heading, the command that removes the entry, and the Brewfile lines
@@ -1324,6 +1377,10 @@ print_keep_remove() {
   printf '    remove:               %s\n' "$remove"
 }
 
+# Said under the heading of the packages installed but not listed, when set:
+# bootstrap says where they came from.
+unlisted_note=''
+
 # Takes the unlisted entries, "<kind> <name>" a line each, and prints each
 # with the commands that keep or remove it. A tap comes after the packages
 # from it: brew untap refuses while one is installed, and listing one keeps
@@ -1332,6 +1389,7 @@ print_unlisted() {
   local entries=$1 kind name tap line remove from
   [[ -n $entries ]] || return 0
   printf '\n%s\n' "Homebrew: installed but not listed — keep or remove each"
+  [[ -z $unlisted_note ]] || printf '  %s\n' "$unlisted_note"
   while read -r kind name; do
     [[ $kind == tap ]] && continue
     local lines=()
@@ -1390,7 +1448,7 @@ print_plan() {
     [[ $result == error ]] || continue
     detail=$(check_detail "$check")
     printf "\nCheck '%s' failed: %s\n" "$check" "$(head -n 1 <<<"$detail")" >&2
-    tail -n +2 <<<"$detail" | sed 's/^/  /' >&2
+    tail -n +2 <<<"$detail" | indent >&2
   done < <(check_table)
   # A warning counts toward nothing.
   [[ -n $macos_notes ]] && warn "$macos_notes"
@@ -1408,7 +1466,7 @@ print_plan() {
   failed=$(failed_checks)
   echo
   if ((change + upgrade + undecided + commits == 0)) && [[ -z $failed ]]; then
-    echo "No changes."
+    echo "No changes. This machine matches the state repo."
     return
   fi
   [[ -n $failed ]] && line="Partial plan (error)"
@@ -1441,7 +1499,7 @@ print_log_line() {
   fi
 
   local line errors='' check result detail
-  line=$(date +%Y-%m-%dT%H:%M:%S%z)
+  line=$(timestamp)
   while IFS=$'\t' read -r check result; do
     line+=" $check=$result"
     detail=$(check_detail "$check")
@@ -1457,7 +1515,7 @@ print_log_line() {
 print_refusal_log_line() {
   local notified=yes notify_detail line
   notify_detail=$(notify "Macelium drift" "The state repo's macelium.conf was refused. Run \`macelium plan\`.") || notified=failed
-  line="$(date +%Y-%m-%dT%H:%M:%S%z) manifest=error notified=$notified"
+  line="$(timestamp) manifest=error notified=$notified"
   line+=" manifest_error=$(printf '%q' "$(detail_line "$1")")"
   [[ -n $notify_detail ]] && line+=" notify_error=$(printf '%q' "$notify_detail")"
   printf '%s\n' "$line"
@@ -1465,23 +1523,25 @@ print_refusal_log_line() {
 
 plan() {
   local mode=full attempts=1 status
-  (($# <= 1)) || usage
-  case "${1:-}" in
-    '') ;;
-    --notify) mode=notify attempts=$notify_fetch_attempts ;;
-    *) usage ;;
-  esac
+  while (($#)); do
+    case $1 in
+      --notify) mode=notify attempts=$notify_fetch_attempts ;;
+      -h | --help) help_and_exit ;;
+      *) unexpected_argument "$1" ;;
+    esac
+    shift
+  done
   find_checkout
   if [[ $manifest_failed == yes ]]; then
     if [[ $mode == notify ]]; then
       print_refusal_log_line "$repo_detail"
     else
-      printf 'macelium plan: %s\n' "$repo_detail" >&2
+      print_error "$repo_detail"
     fi
     return 1
   fi
-  fetch_and_check_behind "$attempts"
-  check_machine "$mode"
+  with_spinner "Fetching the state repo" fetch_and_check_behind "$attempts"
+  with_spinner "Comparing this machine with the state repo" check_machine "$mode"
   plan_status
   status=$?
   if [[ $mode == notify ]]; then
@@ -1509,26 +1569,14 @@ confirm() {
 
 apply_log="$HOME/Library/Logs/macelium-apply.log"
 
-# Prints the command, then runs it.
-run_step() {
-  printf '\n==> %s\n' "$*"
-  "$@" && return 0
-  stop_apply "$* failed"
+# Takes run_terminal_step or run_logged_step, a step's name and its command.
+# Runs it as that kind of step, stopping apply when it fails.
+run_apply_step() {
+  local run=$1
+  shift
+  "$run" "$@" && return 0
+  print_stopped "$1 failed"
   return 1
-}
-
-# Takes a step's name and its command. Runs it as a logged step, stopping
-# apply when it fails.
-run_apply_logged_step() {
-  run_logged_step "$@" && return 0
-  stop_apply "$1 failed"
-  return 1
-}
-
-# Takes why apply stopped, and prints it after the warnings, as its last line.
-stop_apply() {
-  print_warnings
-  printf '\nmacelium apply: stopped: %s\n' "$1" >&2
 }
 
 # Upgrades macelium, then replaces this process with the upgraded command's
@@ -1537,14 +1585,14 @@ stop_apply() {
 # fails. MACELIUM_UPGRADED_FROM stops the new apply doing the same again.
 upgrade_self() {
   local prefix
-  printf '\n==> %s\n' "brew upgrade macelium"
+  print_heading "brew upgrade macelium"
   if ! brew upgrade macelium; then
     echo "No changes made."
     return 1
   fi
   # $0 can name the old keg's path, which the upgrade has replaced.
   if ! prefix=$(brew --prefix) || [[ ! -x $prefix/bin/macelium ]]; then
-    stop_apply "macelium was upgraded, but not found under brew --prefix to run"
+    print_stopped "macelium was upgraded, but not found under brew --prefix to run"
     return 1
   fi
   remove_export_dir
@@ -1554,34 +1602,36 @@ upgrade_self() {
 }
 
 apply() {
-  if [[ ! -t 0 || ! -t 1 ]]; then
-    echo "macelium apply: needs a terminal for its prompts" >&2
-    return 1
-  fi
+  case ${1:-} in
+    '') ;;
+    -h | --help) help_and_exit ;;
+    *) unexpected_argument "$1" ;;
+  esac
+  require_terminal || return 1
   if [[ -n ${MACELIUM_UPGRADED_FROM:-} ]]; then
     printf 'macelium was upgraded from %s to %s, and plans again.\n\n' "$MACELIUM_UPGRADED_FROM" "$VERSION"
   fi
   find_checkout
   if [[ $manifest_failed == yes ]]; then
-    printf 'macelium apply: %s\n' "$repo_detail" >&2
+    print_error "$repo_detail"
     return 1
   fi
-  fetch_and_check_behind 1
+  with_spinner "Fetching the state repo" fetch_and_check_behind 1
   if [[ $behind_result == drift ]]; then
     printf 'Your local macelium state is behind %s by %s:\n' "$upstream" "$(commits_phrase "$(count_lines "$behind_items")")"
-    printf '%s\n' "$behind_items" | sed 's/^/  /'
+    printf '%s\n' "$behind_items" | indent
     if confirm "Pull them first?" yes; then
       git -C "$repo" pull --ff-only || return 1
       # The pulled commits may change the manifest.
       use_checkout "$repo"
       if [[ $manifest_failed == yes ]]; then
-        printf 'macelium apply: %s\n' "$repo_detail" >&2
+        print_error "$repo_detail"
         return 1
       fi
       check_behind
     fi
   fi
-  check_machine full
+  with_spinner "Comparing this machine with the state repo" check_machine full
   print_plan
   if [[ -n $(failed_checks) ]]; then
     echo "No changes made."
@@ -1607,28 +1657,21 @@ apply() {
   # Without an upgrade in the plan, no step upgrades, a state repo's chezmoi
   # script that runs brew bundle included.
   ((upgrades > 0)) || export HOMEBREW_BUNDLE_NO_UPGRADE=1
-  run_step chezmoi apply --force || return 1
-  step_log=$apply_log
-  mkdir -p "$(dirname "$step_log")"
-  if [[ -e $state_brewfile ]]; then
-    run_apply_logged_step "brew bundle" brew bundle --file="$state_brewfile" || return 1
-    if [[ -f $local_brewfile ]]; then
-      run_apply_logged_step "brew bundle (this machine)" brew bundle --file="$local_brewfile" || return 1
-    fi
-  fi
-  run_apply_logged_step "mise install" mise -C "$HOME" install || return 1
+  run_apply_step run_terminal_step "chezmoi apply" chezmoi apply --force || return 1
+  use_step_log "$apply_log"
+  run_install_steps stop run_apply_step run_logged_step || return 1
   if [[ -n $macos_items ]]; then
-    printf '\n==> %s\n' "macOS settings"
+    print_heading "macOS settings"
     if ! write_settings when-writing; then
-      stop_apply "$macos_detail"
+      print_stopped "$macos_detail"
       return 1
     fi
     [[ $settings_written == yes ]] || echo "No macOS settings differ any more."
   fi
   if [[ -n $hooks_items ]]; then
-    printf '\n==> %s\n' "Apps hooks"
+    print_heading "Apps hooks"
     if ! run_apps_hooks; then
-      stop_apply "an apps hook failed"
+      print_stopped "an apps hook failed"
       return 1
     fi
   fi
@@ -1638,14 +1681,21 @@ apply() {
 }
 
 settings_command() {
-  case $# in
-    0) find_checkout ;;
-    2) [[ $1 == --file ]] || usage; settings_file=$2 ;;
-    *) usage ;;
-  esac
+  while (($#)); do
+    case $1 in
+      --file)
+        [[ -n ${2:-} ]] || usage_error "--file needs a path"
+        settings_file=$2
+        shift
+        ;;
+      -h | --help) help_and_exit ;;
+      *) unexpected_argument "$1" ;;
+    esac
+    shift
+  done
+  [[ -n $settings_file ]] || find_checkout
   if ! write_settings always; then
-    print_warnings
-    printf '\nmacelium settings: stopped: %s\n' "$macos_detail" >&2
+    print_stopped "$macos_detail"
     return 1
   fi
   print_warnings
@@ -2035,14 +2085,50 @@ step_clear() {
   drawn=no
 }
 
+# Takes what is being done, and draws it on the cursor's line, led by the
+# spinner and cut to the terminal's width, then turns the spinner until
+# killed or this macelium exits. Each frame saves and restores the cursor, so
+# a prompt the command writes after what is being done, such as ssh's for a
+# key's passphrase, stays whole, with the cursor after it.
+spin() {
+  local frame=0 columns
+  columns=$(terminal_size)
+  columns=${columns#* }
+  printf '\r%.*s' $((columns - 1)) "  ${spinner[0]} $1"
+  while sleep "$frame_time" && kill -0 "$$" 2>/dev/null; do
+    ((frame++))
+    printf '\0337\r  %s\0338' "${spinner[frame % ${#spinner[@]}]}"
+  done
+}
+
+# Takes what is being done and a command. Runs the command in this shell, so
+# what it sets stays set, while, on a terminal, the spinner turns beside what
+# is being done.
+with_spinner() {
+  local label=$1 spinner_pid status
+  shift
+  if [[ ! -t 1 ]]; then
+    "$@"
+    return
+  fi
+  spin "$label" &
+  spinner_pid=$!
+  "$@"
+  status=$?
+  kill "$spinner_pid" 2>/dev/null
+  wait "$spinner_pid" 2>/dev/null
+  printf '\r\033[K'
+  return "$status"
+}
+
 # Takes a step's name and its command. Runs the command with its output in
 # the log, showing only Homebrew's progress lines and the step's status
 # (show_step), and records the step.
 run_logged_step() {
   local name=$1 out status on_tty=no cache=''
   shift
-  printf '\n==> %s (output in %s)\n' "$name" "$step_log"
-  printf '\n==> %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*" >>"$step_log"
+  print_heading "$name (output in $step_log)"
+  printf '\n==> %s %s\n' "$(timestamp)" "$*" >>"$step_log"
   out=$(mktemp)
   [[ -t 1 ]] && on_tty=yes
   if [[ $1 == brew ]]; then
@@ -2089,7 +2175,7 @@ run_logged_step() {
 run_terminal_step() {
   local name=$1
   shift
-  printf '\n==> %s\n' "$name"
+  print_heading "$name"
   if "$@"; then
     record_step "$name" ok
   else
@@ -2098,14 +2184,39 @@ run_terminal_step() {
   fi
 }
 
+# Takes the log for the logged steps that follow.
+use_step_log() {
+  step_log=$1
+  mkdir -p "$(dirname "$step_log")"
+}
+
+# Takes stop or continue, whether a step that fails stops those after it, and
+# the command that runs a logged step, without its step's name and command.
+# Runs brew bundle over each Brewfile, then mise install, each a step of its
+# own, and returns non-zero when one failed.
+run_install_steps() {
+  local on_failure=$1 names=() files=() i status=0
+  shift
+  if [[ -e $state_brewfile ]]; then
+    names+=("brew bundle, the state repo's Brewfile") files+=("$state_brewfile")
+    if [[ -f $local_brewfile ]]; then
+      names+=("brew bundle, this machine's Brewfile.local") files+=("$local_brewfile")
+    fi
+  fi
+  for ((i = 0; i < ${#files[@]}; i++)); do
+    "$@" "${names[i]}" brew bundle --file="${files[i]}" && continue
+    status=1
+    [[ $on_failure == continue ]] || return 1
+  done
+  "$@" "mise install" mise -C "$HOME" install || status=1
+  return "$status"
+}
+
 # Prints the state repo's notes on chezmoi init's questions, before chezmoi
 # asks them on a machine that has no chezmoi config yet.
 print_init_notes() {
-  local config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/chezmoi config
   [[ -n $state_init_notes && -f $state_init_notes ]] || return 0
-  for config in "$config_dir"/chezmoi.*; do
-    [[ -e $config ]] && return 0
-  done
+  chezmoi_config_file >/dev/null && return 0
   cat "$state_init_notes"
 }
 
@@ -2123,15 +2234,11 @@ explain_changed_files() {
 
 # Prints the manual steps, those the machine shows undone first.
 print_remaining() {
-  local i note
   # The shell that ran the bootstrap started before chezmoi wrote its config.
   echo "Run \`exec zsh -l\`, so this shell reads its new config."
   if [[ -e $state_settings ]] && load_settings_list "$state_settings"; then
-    for ((i = 0; i < ${#sandbox_domain[@]}; i++)); do
-      probe_sandbox "$i"
-      note=$(sandbox_note "$i")
-      [[ -n $note ]] && echo "$note."
-    done
+    probe_sandboxes
+    [[ -z $macos_notes ]] || printf '%s.\n' "${macos_notes//$'\n'/.$'\n'}"
   fi
   echo "Open each newly installed app once, granting the permissions it asks for."
   local steps
@@ -2351,10 +2458,19 @@ banner_frame() {
 # Takes the checkout to set up from, or none for the one chezmoi's config
 # names.
 bootstrap() {
-  if [[ ! -t 0 || ! -t 1 ]]; then
-    echo "macelium bootstrap: needs a terminal for its prompts" >&2
-    return 1
-  fi
+  local checkout=''
+  while (($#)); do
+    case $1 in
+      -h | --help) help_and_exit ;;
+      -*) unexpected_argument "$1" ;;
+      *)
+        [[ -z $checkout ]] || unexpected_argument "$1"
+        checkout=$1
+        ;;
+    esac
+    shift
+  done
+  require_terminal || return 1
   print_banner
   if ! command -v brew >/dev/null; then
     local prefix
@@ -2362,18 +2478,18 @@ bootstrap() {
       [[ -x $prefix/bin/brew ]] && break
     done
     if [[ ! -x $prefix/bin/brew ]]; then
-      echo "macelium bootstrap: Homebrew is not installed: see https://brew.sh" >&2
+      print_error "Homebrew is not installed: see https://brew.sh"
       return 1
     fi
     eval "$("$prefix/bin/brew" shellenv bash)"
   fi
   rerun='macelium bootstrap'
   local dir=''
-  if (($# == 1)) && ! dir=$(cd "$1" 2>/dev/null && pwd -P); then
-    echo "macelium bootstrap: no directory $1" >&2
+  if [[ -n $checkout ]] && ! dir=$(cd "$checkout" 2>/dev/null && pwd -P); then
+    print_error "no directory $checkout"
     return 1
   fi
-  refuse_foreign_chezmoi bootstrap || return 1
+  refuse_foreign_chezmoi || return 1
   if [[ -n $dir ]]; then
     use_checkout "$dir"
     rerun+=" $(printf '%q' "$dir")"
@@ -2381,7 +2497,7 @@ bootstrap() {
     find_checkout
   fi
   if [[ -z $repo ]]; then
-    echo "macelium bootstrap: $repo_detail" >&2
+    print_error "$repo_detail"
     return 1
   fi
 
@@ -2394,16 +2510,14 @@ bootstrap() {
   check_filevault
 
   start_sudo || {
-    echo "macelium bootstrap: stopped: sudo failed" >&2
+    print_stopped "sudo failed"
     return 1
   }
-  step_log=$bootstrap_log
-  mkdir -p "$(dirname "$step_log")"
+  use_step_log "$bootstrap_log"
 
   print_init_notes
   run_terminal_step "chezmoi init" chezmoi init --source "$repo" || {
-    print_warnings
-    echo "macelium bootstrap: stopped: chezmoi init failed" >&2
+    print_stopped "chezmoi init failed"
     return 1
   }
   # Each script and step is its own, so one that fails stops none after it,
@@ -2417,13 +2531,7 @@ bootstrap() {
     [[ -n $script ]] || continue
     run_logged_step "$script" chezmoi apply --source "$repo" "$HOME/$script" 3<&-
   done 3< <(chezmoi managed --source "$repo" --include scripts)
-  if [[ -e $state_brewfile ]]; then
-    run_logged_step "brew bundle" brew bundle --file="$state_brewfile"
-    if [[ -f $local_brewfile ]]; then
-      run_logged_step "brew bundle (this machine)" brew bundle --file="$local_brewfile"
-    fi
-  fi
-  run_logged_step "mise install" mise -C "$HOME" install
+  run_install_steps continue run_logged_step
   if [[ -e $state_settings ]]; then
     run_logged_step "macOS settings" settings_step
   fi
@@ -2433,11 +2541,12 @@ bootstrap() {
     drift) run_logged_step "Apps hooks" run_apps_hooks ;;
     error)
       record_step "Apps hooks" failed
-      printf '\n==> Apps hooks\n%s\n' "$hooks_detail"
+      print_heading "Apps hooks"
+      printf '%s\n' "$hooks_detail"
       ;;
   esac
 
-  printf '\n==> Differences from the repo (macelium plan)\n'
+  print_heading "Differences from the state repo (macelium plan)"
   # plan compares the machine with the checkout chezmoi's config names, so
   # after applying another, such as a worktree, it would list their difference.
   local applied=$repo
@@ -2445,9 +2554,12 @@ bootstrap() {
   if [[ $repo != "$applied" ]]; then
     echo "Skipped: this bootstrap ran from $applied, and macelium plan only checks $repo."
   else
-    echo "Packages installed but not listed predate the bootstrap: list, keep or remove each."
     # Its warnings print within it; the bootstrap's own print at the end.
-    (warnings='' && plan)
+    (
+      warnings=''
+      unlisted_note="They were on this Mac before the bootstrap: the state repo doesn't list them."
+      plan
+    )
   fi
   repo=$applied
 
@@ -2496,13 +2608,6 @@ ask_value() {
       return 0
     fi
   done
-}
-
-# Takes a string. Prints it as a TOML basic string.
-toml_string() {
-  local s=${1//\\/\\\\}
-  s=${s//\"/\\\"}
-  printf '"%s"' "$s"
 }
 
 # Prints this Mac's formulae, casks and taps as a Brewfile, with macelium's
@@ -2587,7 +2692,8 @@ gitconfig_template() {
 offer_capture() {
   local where='and will be published if the repo is public'
   [[ $2 == yes ]] && where='and will be published with it, since the repo is public'
-  printf '\n==> ~/%s\n' "$1"
+  # shellcheck disable=SC2088 # shown, not expanded
+  print_heading "~/$1"
   cat "$HOME/$1"
   printf '\n~/%s goes into the state repo, %s.\n' "$1" "$where"
   [[ -z ${3:-} ]] || printf '%s\n' "$3"
@@ -2624,16 +2730,23 @@ append_local() {
 # Takes [--public] and the path. Captures this Mac into a new state repo at
 # the path, a git repo with one commit and no remote (README.md, "Commands").
 init_command() {
-  local public=no path
-  if [[ ${1:-} == --public ]]; then
-    public=yes
+  local public=no path=''
+  while (($#)); do
+    case $1 in
+      --public) public=yes ;;
+      -h | --help) help_and_exit ;;
+      -*) unexpected_argument "$1" ;;
+      *)
+        [[ -z $path ]] || unexpected_argument "$1"
+        path=$1
+        ;;
+    esac
     shift
-  fi
-  (($# == 1)) || usage
-  path=$1
-  refuse_foreign_chezmoi init || return 1
+  done
+  [[ -n $path ]] || usage_error "missing <path>"
+  refuse_foreign_chezmoi || return 1
   if [[ -e $path && ! -d $path ]] || [[ -d $path && -n $(ls -A "$path") ]]; then
-    echo "macelium init: $path exists and is not empty: name a new or empty directory" >&2
+    print_error "$path exists and is not empty: name a new or empty directory"
     return 1
   fi
 
@@ -2648,14 +2761,14 @@ init_command() {
   fi
   echo "Your name and email go into the state repo, for every machine's git config, and author its first commit."
   if ! name=$(ask_value Name "$default_name") || ! email=$(ask_value Email "$default_email"); then
-    echo "macelium init: no answer, so nothing was written" >&2
+    print_error "no answer, so nothing was written"
     return 1
   fi
 
   local brewfile
-  printf '\n==> brew bundle dump --formula --cask --tap\n'
+  print_heading "brew bundle dump --formula --cask --tap"
   if ! brewfile=$(init_brewfile); then
-    echo "macelium init: brew bundle dump failed, so nothing was written" >&2
+    print_error "brew bundle dump failed, so nothing was written"
     return 1
   fi
 
@@ -2692,7 +2805,7 @@ init_command() {
       printf '%s\n' '# Values every machine shares, which templates read as {{ .name }} and' \
         '# {{ .email }}. One machine'\''s differences go in ~/.gitconfig.local and' \
         '# ~/.zshrc.local, never here.' \
-        "name = $(toml_string "$name")" "email = $(toml_string "$email")" >"$home/.chezmoidata.toml" &&
+        "name = $(quoted_string "$name")" "email = $(quoted_string "$email")" >"$home/.chezmoidata.toml" &&
       { [[ -z $gitconfig ]] || printf '%s\n' "$gitconfig" >"$home/dot_gitconfig.tmpl"; } &&
       { [[ -z $zshrc ]] || printf '%s\n' "$zshrc" >"$home/dot_zshrc"; } &&
       { [[ -z $mise ]] || { mkdir -p "$home/dot_config/mise" && printf '%s\n' "$mise" >"$home/dot_config/mise/config.toml"; }; } &&
@@ -2701,11 +2814,11 @@ init_command() {
       git -C "$path" -c user.name="$name" -c user.email="$email" -c commit.gpgsign=false \
         commit -q --no-verify -m 'Capture this Mac with macelium init'
   }; then
-    echo "macelium init: writing $path failed: remove it and run macelium init again" >&2
+    print_error "writing $path failed: remove it and run macelium init again"
     return 1
   fi
   if ! append_local "$HOME/.gitconfig.local" "$gitconfig_moved" || ! append_local "$HOME/.zshrc.local" "$zshrc_moved"; then
-    echo "macelium init: moving the secrets to the .local files failed; they stay in ~/.gitconfig and ~/.zshrc, and out of the state repo" >&2
+    print_error "moving the secrets to the .local files failed; they stay in ~/.gitconfig and ~/.zshrc, and out of the state repo"
     return 1
   fi
 
@@ -2715,41 +2828,182 @@ init_command() {
   echo "Next, push it to a new repo, then run macelium bootstrap $path."
 }
 
-usage() {
-  echo "usage: macelium init [--public] <path> | macelium bootstrap [<checkout>] | macelium plan [--notify] | macelium apply | macelium settings [--file <path>] | macelium --version" >&2
+# Takes a command, or nothing for macelium itself, and prints its synopsis,
+# the arguments after `macelium`, or nothing when there is no such command.
+synopsis() {
+  case ${1:-} in
+    '') echo '<command> [<options>]' ;;
+    init) echo 'init [--public] <path>' ;;
+    bootstrap) echo 'bootstrap [<checkout>]' ;;
+    plan) echo 'plan [--notify]' ;;
+    apply) echo 'apply' ;;
+    settings) echo 'settings [--file <path>]' ;;
+    help) echo 'help [<command>]' ;;
+  esac
+}
+
+# Takes a command, or nothing for macelium itself, and prints its help.
+print_help() {
+  printf 'Usage: macelium %s\n\n' "$(synopsis "${1:-}")"
+  case ${1:-} in
+    '')
+      cat <<'EOF'
+Keep this Mac in line with a state repo: a chezmoi source with macelium.conf
+at its root, listing its packages, runtimes, files and macOS settings.
+
+Commands:
+  init       Capture this Mac into a new state repo
+  bootstrap  Set up this Mac from a state repo
+  plan       Show how this Mac differs from the state repo
+  apply      Bring this Mac in line with the state repo
+  settings   Write the macOS settings that differ from the settings list
+  help       Show the help for macelium or one of its commands
+
+Options:
+  -h, --help     Show this help
+  -V, --version  Print macelium's version
+
+Run `macelium <command> --help` for a command's options.
+EOF
+      ;;
+    init)
+      cat <<'EOF'
+Capture this Mac into a new state repo at <path>, a missing or empty
+directory: a Brewfile of what Homebrew installed, your name and email, and,
+each on a yes, ~/.gitconfig, ~/.zshrc and the mise config. It commits once,
+and neither pushes nor bootstraps.
+
+Options:
+  --public    Say, when offering each file, that the repo will be public
+  -h, --help  Show this help
+EOF
+      ;;
+    bootstrap)
+      cat <<'EOF'
+Set up this Mac from <checkout>, or else from the checkout chezmoi's config
+names: initialize chezmoi, apply the files, then run each chezmoi script,
+brew bundle, mise install, the macOS settings and the apps hooks, each as a
+step of its own. It can run again at any point. It needs a terminal.
+
+Options:
+  -h, --help  Show this help
+EOF
+      ;;
+    plan)
+      cat <<'EOF'
+Show how this Mac differs from the state repo, changing nothing on it but a
+git fetch in the checkout and a brew update. Exits 0 when nothing differs,
+2 when anything but an available upgrade does, and 1 when a check failed.
+
+Options:
+  --notify    Print one log line, without the brew update, and post a macOS
+              notification when the exit status is not 0
+  -h, --help  Show this help
+EOF
+      ;;
+    apply)
+      cat <<'EOF'
+Show the plan, ask, then bring this Mac in line with the state repo: chezmoi
+apply, brew bundle, mise install, the macOS settings and the apps hooks. It
+never removes anything. It needs a terminal.
+
+Options:
+  -h, --help  Show this help
+EOF
+      ;;
+    settings)
+      cat <<'EOF'
+Write the macOS settings that differ from the state repo's settings list,
+without asking, and restart the apps that read them.
+
+Options:
+  --file <path>  Read this settings list instead of the state repo's
+  -h, --help     Show this help
+EOF
+      ;;
+    help)
+      cat <<'EOF'
+Show the help for macelium, or for <command>.
+
+Options:
+  -h, --help  Show this help
+EOF
+      ;;
+  esac
+}
+
+# Takes what is wrong with the arguments, and prints it with the command's
+# synopsis, then exits 1.
+usage_error() {
+  print_error "$1"
+  printf 'Usage: macelium %s\n' "$(synopsis "$subcommand")" >&2
+  # shellcheck disable=SC2016 # the backticks quote the command
+  printf 'Run `macelium %s--help` for more.\n' "${subcommand:+$subcommand }" >&2
   exit 1
+}
+
+# Prints the command's help, then exits 0.
+help_and_exit() {
+  print_help "$subcommand"
+  exit 0
+}
+
+# Takes an argument the command does not take.
+unexpected_argument() {
+  if [[ $1 == -* ]]; then
+    usage_error "unknown option '$1'"
+  else
+    usage_error "unexpected argument '$1'"
+  fi
+}
+
+help_command() {
+  local command=''
+  while (($#)); do
+    case $1 in
+      -h | --help) help_and_exit ;;
+      -*) unexpected_argument "$1" ;;
+      *)
+        [[ -z $command ]] || unexpected_argument "$1"
+        [[ -n $(synopsis "$1") ]] || usage_error "unknown command '$1'"
+        command=$1
+        ;;
+    esac
+    shift
+  done
+  print_help "$command"
 }
 
 # Sourced, as the tests do to reach one function, it defines and runs nothing.
 [[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 
-case "${1:-}" in
-  init)
+case ${1:-} in
+  init | bootstrap | plan | apply | settings | help)
+    subcommand=$1
     shift
-    init_command "$@"
     ;;
-  bootstrap)
-    shift
-    (($# <= 1)) || usage
-    bootstrap "$@"
+esac
+
+case $subcommand in
+  init) init_command "$@" ;;
+  bootstrap) bootstrap "$@" ;;
+  plan) plan "$@" ;;
+  apply) apply "$@" ;;
+  settings) settings_command "$@" ;;
+  help) help_command "$@" ;;
+  *)
+    case ${1:-} in
+      -h | --help | -V | --version) (($# == 1)) || unexpected_argument "$2" ;;
+    esac
+    case ${1:-} in
+      -h | --help) print_help ;;
+      -V | --version) echo "macelium $VERSION" ;;
+      '')
+        print_help >&2
+        exit 1
+        ;;
+      -*) unexpected_argument "$1" ;;
+      *) usage_error "unknown command '$1'" ;;
+    esac
     ;;
-  plan)
-    shift
-    plan "$@"
-    ;;
-  apply)
-    shift
-    (($# == 0)) || usage
-    apply
-    ;;
-  settings)
-    shift
-    settings_command "$@"
-    ;;
-  -V | --version)
-    shift
-    (($# == 0)) || usage
-    echo "macelium $VERSION"
-    ;;
-  *) usage ;;
 esac
