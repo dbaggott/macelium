@@ -14,6 +14,16 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.5.0
+
+- `macelium init` and `macelium bootstrap` refuse, exit 1, before changing
+  anything, a Mac with a chezmoi setup that is not macelium's: a chezmoi
+  config whose source is not in a checkout with `macelium.conf`, or no config
+  and a non-empty `~/.local/share/chezmoi`. The refusal says how to switch:
+  save the old source, keep any `age` or `gpg` key file, run `chezmoi purge`,
+  and run the command again. A config naming a macelium checkout passes.
+- `bootstrap` warns, and goes on, when FileVault is off.
+
 ## 0.4.0
 
 - `macelium init [--public] <path>` captures this Mac into a new state repo:

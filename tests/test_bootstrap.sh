@@ -337,3 +337,93 @@ test_bootstrap_script_reading_input_leaves_the_list_alone() {
   assert_not_contains "$STUB_LOG" "read stdin: .local/"
   assert_not_contains "$STUB_LOG" "read fd 3: .local/"
 }
+
+# A chezmoi setup that is not macelium's is refused, with a checkout named
+# and with none, before anything changes. The checkout named is a state repo.
+
+# Bootstraps with the checkout and without, each refused.
+assert_bootstrap_refused() {
+  listing_now
+  run_tty -- "$tool" bootstrap "$state"
+  assert_refused bootstrap
+  run_tty -- "$tool" bootstrap
+  assert_refused bootstrap
+}
+
+test_bootstrap_refuses_a_config_naming_a_git_tree_without_manifest() {
+  make_state macelium.conf $'contract 1\n'
+  other_source
+  chezmoi_config "$other"
+  assert_bootstrap_refused
+  assert_contains "$out" "names a source in $other, which has no macelium.conf"
+}
+
+test_bootstrap_refuses_a_config_naming_a_missing_source() {
+  make_state macelium.conf $'contract 1\n'
+  chezmoi_config "$sandbox/missing"
+  assert_bootstrap_refused
+}
+
+test_bootstrap_refuses_a_config_chezmoi_cannot_read() {
+  make_state macelium.conf $'contract 1\n'
+  chezmoi_config
+  assert_bootstrap_refused
+}
+
+test_bootstrap_refuses_a_source_without_config() {
+  make_state macelium.conf $'contract 1\n'
+  mkdir -p "$HOME/.local/share/chezmoi"
+  printf 'x\n' >"$HOME/.local/share/chezmoi/dot_zshrc"
+  assert_bootstrap_refused
+  assert_contains "$out" "$HOME/.local/share/chezmoi holds a chezmoi source, and there is no chezmoi config"
+}
+
+test_bootstrap_takes_a_config_naming_another_checkout() {
+  make_state macelium.conf $'contract 1\n'
+  local named=$state
+  git clone -q "$sandbox/state.git" "$sandbox/second"
+  chezmoi_config "$named"
+  run_tty -- "$tool" bootstrap "$sandbox/second"
+  assert_contains "$out" "STUB chezmoi init"
+  assert_not_contains "$out" "not macelium's"
+}
+
+test_bootstrap_takes_a_config_naming_the_chezmoiroot_directory() {
+  make_state macelium.conf $'contract 1\n' .chezmoiroot $'home\n' home/dot_zshrc $'x\n'
+  chezmoi_config "$state/home"
+  run_tty -- "$tool" bootstrap
+  assert_contains "$out" "STUB chezmoi init"
+  assert_not_contains "$out" "not macelium's"
+}
+
+test_bootstrap_takes_no_config_and_an_empty_source_directory() {
+  make_state macelium.conf $'contract 1\n'
+  mkdir -p "$HOME/.local/share/chezmoi"
+  run_tty -- "$tool" bootstrap "$state"
+  assert_contains "$out" "STUB chezmoi init"
+  assert_not_contains "$out" "not macelium's"
+}
+
+# FileVault.
+
+test_bootstrap_warns_when_filevault_is_off_and_goes_on() {
+  make_state macelium.conf $'contract 1\n'
+  export STUB_FDESETUP_STATUS='FileVault is Off.'
+  run_tty -- "$tool" bootstrap "$state"
+  assert_order "$out" "Warning: FileVault is off" "==> chezmoi init" "Steps:"
+  sed -n '/^Steps:/,$p' "$out" | grep -qF "Warning: FileVault is off" || fail "no FileVault warning at the end"
+  assert_contains "$out" "System Settings -> Privacy & Security -> FileVault"
+  assert_contains "$out" "Bootstrap complete, with 1 warning."
+}
+
+test_bootstrap_says_nothing_of_filevault_when_on_or_unknown() {
+  make_state macelium.conf $'contract 1\n'
+  run_tty -- "$tool" bootstrap "$state"
+  assert_contains "$STUB_LOG" "fdesetup status"
+  assert_contains "$out" "STUB chezmoi init"
+  assert_not_contains "$out" "FileVault"
+  export STUB_FDESETUP_FAILS=1
+  run_tty -- "$tool" bootstrap "$state"
+  assert_contains "$out" "STUB chezmoi init"
+  assert_not_contains "$out" "FileVault"
+}

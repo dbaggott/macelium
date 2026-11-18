@@ -17,8 +17,8 @@ setup_sandbox() {
   mkdir -p "$HOME" "$sandbox/bin"
   cp "$(dirname "$tool")"/tests/stubs/* "$sandbox/bin/"
   export PATH=$sandbox/bin:$PATH
-  unset XDG_CONFIG_HOME STUB_SOURCE_PATH STUB_CHEZMOI_STATUS STUB_CHEZMOI_MANAGED STUB_CHEZMOI_APPLY_READS STUB_BREW_UNLISTED STUB_BREW_OUTDATED \
-    STUB_BREW_UPGRADE_FAILS STUB_BREW_BUNDLE_OUTPUT STUB_BREW_BUNDLE_FAILS STUB_BREW_PREFIX STUB_BREW_CACHE STUB_BREW_DUMP STUB_SUDO_ASKS GIT_CONFIG_GLOBAL MACELIUM_UPGRADED_FROM
+  unset XDG_CONFIG_HOME XDG_DATA_HOME STUB_SOURCE_PATH STUB_CHEZMOI_STATUS STUB_CHEZMOI_MANAGED STUB_CHEZMOI_APPLY_READS STUB_BREW_UNLISTED STUB_BREW_OUTDATED \
+    STUB_BREW_UPGRADE_FAILS STUB_BREW_BUNDLE_OUTPUT STUB_BREW_BUNDLE_FAILS STUB_BREW_PREFIX STUB_BREW_CACHE STUB_BREW_DUMP STUB_SUDO_ASKS STUB_FDESETUP_STATUS STUB_FDESETUP_FAILS GIT_CONFIG_GLOBAL MACELIUM_UPGRADED_FROM
   : >"$STUB_LOG"
 }
 
@@ -123,4 +123,46 @@ assert_order() {
     ((line > previous)) || fail "$(basename "$file"): '$text' comes before what precedes it"
     previous=$line
   done
+}
+
+# A chezmoi setup that is not macelium's (refuse_foreign_chezmoi), as each
+# case sets it up, and its refusal.
+
+# Takes the source the chezmoi stub names, and writes a chezmoi config file,
+# whose content the stub ignores. With no source, chezmoi source-path fails,
+# as on a config chezmoi can't parse.
+chezmoi_config() {
+  mkdir -p "$HOME/.config/chezmoi"
+  printf '[data]\nemail = "me@example.com"\n' >"$HOME/.config/chezmoi/chezmoi.toml"
+  if [[ -n ${1:-} ]]; then export STUB_SOURCE_PATH=$1; else unset STUB_SOURCE_PATH; fi
+}
+
+# A git tree with no macelium.conf, as chezmoi's own source.
+other_source() {
+  other=$sandbox/other
+  git init -q "$other"
+  printf 'x\n' >"$other/dot_zshrc"
+}
+
+# Sets listing to every path under the sandbox but the stub log and the
+# output, to compare before and after a refusal.
+listing_now() {
+  listing=$(cd "$sandbox" && find . ! -path ./calls.log ! -path ./out ! -path ./err | sort)
+}
+
+# Takes the command refused. Checks the run that the last listing_now came
+# before: exit 1, the refusal's guidance, and nothing changed.
+assert_refused() {
+  local before=$listing
+  assert_status 1
+  assert_contains "$out" "macelium $1: this Mac has a chezmoi setup that is not macelium's:"
+  assert_contains "$out" "Save the old chezmoi source if it holds anything not saved elsewhere"
+  assert_contains "$out" "Keep a copy of any age or gpg key file"
+  assert_contains "$out" "Run \`chezmoi purge\`"
+  assert_contains "$out" "The files left in place are what \`macelium init\` captures."
+  assert_not_contains "$out" "checkout not found"
+  assert_not_contains "$STUB_LOG" "chezmoi init"
+  assert_not_contains "$STUB_LOG" "sudo"
+  listing_now
+  [[ $listing == "$before" ]] || fail "files changed: $(diff <(printf '%s\n' "$before") <(printf '%s\n' "$listing"))"
 }

@@ -334,3 +334,64 @@ test_ci_checks_step_has_a_timeout() {
   awk '/- name: Run the checks/ { step = 1; next } step && /- name:/ { exit } step && /timeout-minutes:/ { found = 1 } END { exit !found }' \
     "$(dirname "$tool")/.github/workflows/ci.yml" || fail "Run the checks has no timeout-minutes"
 }
+
+# A chezmoi setup that is not macelium's is refused before any prompt or
+# write.
+
+# Runs init, refused, with nothing written at the path or under ~.
+assert_init_refused() {
+  listing_now
+  run_tty -- "$tool" init "$repo"
+  assert_refused init
+  [[ ! -e $repo ]] || fail "init wrote $repo"
+}
+
+test_init_refuses_a_config_naming_a_git_tree_without_manifest() {
+  init_mac
+  other_source
+  chezmoi_config "$other"
+  assert_init_refused
+}
+
+test_init_refuses_a_config_naming_a_missing_source() {
+  init_mac
+  chezmoi_config "$sandbox/missing"
+  assert_init_refused
+}
+
+test_init_refuses_a_config_chezmoi_cannot_read() {
+  init_mac
+  chezmoi_config
+  assert_init_refused
+}
+
+test_init_refuses_a_source_without_config() {
+  init_mac
+  mkdir -p "$HOME/.local/share/chezmoi"
+  printf 'x\n' >"$HOME/.local/share/chezmoi/dot_zshrc"
+  assert_init_refused
+}
+
+# Takes the path to init, and checks that init runs to its end there.
+assert_init_passes() {
+  init_mac
+  repo=$1
+  git_user
+  run_tty '' '' n -- "$tool" init "$repo"
+  assert_status 0
+  assert_not_contains "$out" "not macelium's"
+  assert_contains "$out" "State repo: $repo, with one commit and no remote."
+}
+
+test_init_takes_a_config_naming_a_macelium_checkout() {
+  make_state macelium.conf $'contract 1\n' .chezmoiroot $'home\n' home/dot_zshrc $'x\n'
+  chezmoi_config "$state"
+  assert_init_passes "$sandbox/new"
+  chezmoi_config "$state/home"
+  assert_init_passes "$sandbox/new2"
+}
+
+test_init_takes_no_config_and_an_empty_source_directory() {
+  mkdir -p "$HOME/.local/share/chezmoi"
+  assert_init_passes "$sandbox/new"
+}
