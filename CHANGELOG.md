@@ -14,7 +14,7 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
-## Unreleased
+## 0.7.0
 
 - `macelium --help`, `-h` and `macelium help [<command>]` print the commands,
   or one command's usage and options, and `macelium <command> --help` a
