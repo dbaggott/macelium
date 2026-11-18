@@ -24,6 +24,12 @@ contract than its own.
   and run the command again. A config naming a macelium checkout passes.
 - `bootstrap` warns, and goes on, when FileVault is off.
 
+## 0.4.1
+
+- The status line's spinner is two mushrooms side by side, each growing and
+  falling over onto the other's spot, where its spore sprouts the next, so it
+  turns in a loop rather than growing and fading in place.
+
 ## 0.4.0
 
 - `macelium init [--public] <path>` captures this Mac into a new state repo:

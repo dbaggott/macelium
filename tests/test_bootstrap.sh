@@ -270,6 +270,14 @@ test_logged_step_turns_its_spinner_in_place() {
   [[ $raw == *$'\0337\r  '???$'\0338'* ]] || fail "no spinner frame was drawn in place"
 }
 
+test_every_spinner_frame_is_as_wide_as_the_status_it_replaces() {
+  source_macelium
+  local frame
+  for frame in "${spinner[@]}"; do
+    ((${#frame} == 3)) || fail "frame [$frame] is ${#frame} columns wide"
+  done
+}
+
 test_logged_step_cuts_its_status_to_the_terminal_width() {
   # shellcheck disable=SC2016 # expanded by the inner bash
   run_tty_raw 3 /bin/bash -c 'stty cols 30; source "$1"; tick=1 step_log=$HOME/bootstrap.log; run_logged_step "a step with a long name" sleep 1.5' \

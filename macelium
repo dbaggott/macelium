@@ -1679,9 +1679,11 @@ step_log=''
 tick=5
 # Seconds between a logged step's spinner frames, on a terminal.
 frame_time=0.15
-# The spinner, a mushroom growing and fading, which takes the place of the
-# status's leading "..." on a terminal, at the same width.
-spinner=('   ' ' . ' ' , ' ' o ' ' n ' '.n.' '(T)' '(T)' '(T)' '.T.' ' T ' ' t ' ' . ')
+# The spinner, which takes the place of the status's leading "..." on a
+# terminal, at the same width: two mushrooms side by side, each growing and
+# falling onto the other's spot, where its spore sprouts the next, so it runs
+# in a loop that pauses only while each stands.
+spinner=('n  ' 'T  ' 'T  ' '/  ' '_. ' '., ' ' o ' ' n ' ' T ' ' T ' ' \ ' '._ ' ',. ' 'o  ')
 # The lines a logged step's tickers, and the end of its command, send its
 # display loop (show_step), which no command prints.
 tick_marker=$'\x01macelium tick' frame_marker=$'\x01macelium frame' done_marker=$'\x01macelium done'
