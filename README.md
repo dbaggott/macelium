@@ -17,8 +17,67 @@ It needs macOS, Homebrew, chezmoi, mise and jq.
 
 ## Install
 
-On a new Mac, paste this into Terminal, with your state repo, and follow
-what it asks:
+On a Mac, paste this into Terminal and follow what it asks, whether or not
+you have a state repo yet:
+
+```sh
+curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh | bash
+```
+
+[`install.sh`](install.sh) first installs Homebrew, when neither
+`/opt/homebrew` nor `/usr/local` holds it, and macelium,
+`brew install dbaggott/tap/macelium`. Then it asks where your state repo is,
+on GitHub (the default) or another git host:
+
+- **GitHub.** It asks your username, and looks for
+  `<username>/macelium-state`, without signing in. Leave the username empty
+  if you have no account yet: it signs in with `gh auth login`, whose
+  browser page can create one. When the repo reads without a sign-in, it
+  asks you to confirm it, and asks your repo's name or URL if you don't.
+  When it doesn't read, it signs in and asks `gh`. With no
+  `macelium-state`, it asks whether this is the first time, which creates
+  one, or your repo has another name, which it then asks for, as
+  `<owner>/<repo>` or a git URL.
+- **Another host.** It asks the repo's git URL, and stops if git can't read
+  it. The host needs a personal access token or a registered SSH key, since
+  account passwords are refused over HTTPS; git and its credential helper
+  ask for what they need.
+
+Before cloning or creating, it asks where the state repo goes. The default
+is `<dir>/<name>`, with the repo's name, where `<dir>` is the first of
+`~/Developer`, `~/git`, `~/src`, `~/code` and `~/Projects` that exists, else
+your home directory.
+
+**With a state repo** that has commits, it clones it there and runs
+`macelium bootstrap <path>`. When GitHub read it without a sign-in and `gh`
+isn't signed in, it then offers the sign-in, default yes, so you can push
+changes from this machine.
+
+**With none yet**, or a repo with no commits, it captures this Mac into a
+new state repo:
+
+1. on GitHub, for a new repo, asks who can read it: only you (private, the
+   default) or anyone (public)
+2. runs `macelium init [--public] <path>` ("Commands")
+3. on GitHub, for a new repo, runs
+   `gh repo create <username>/macelium-state --private|--public --source <path> --push`;
+   if that fails for a private repo, it shows why and offers a public one,
+   default no. For a repo that exists, it adds it as the `origin` remote and
+   pushes.
+4. runs `macelium bootstrap <path>`, and exits with its status
+
+It skips each step already done, so pasting it again picks up where it
+stopped: it asks the same questions, and then, by what the path holds,
+creates the state repo there, pushes it, or bootstraps it. It refuses a
+path that holds anything else, before changing it.
+
+At end-of-file on the terminal, as when it has gone away, it stops at any
+question, and takes no at an offer.
+
+### Naming the state repo
+
+When you know your state repo, name it, and the installer asks no question of its
+own but the sign-in offer:
 
 ```sh
 curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh | bash -s <repo> [<path>]
@@ -26,35 +85,29 @@ curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install
 
 `<repo>` is a GitHub `<owner>/<repo>`, or the repo's git URL on any host:
 `https://host/path`, `ssh://user@host/path`, or `user@host:path`.
+`<path>` is where the state repo is cloned, with the default above. The
+installer prints the path it chose.
 
-`<path>` is where the state repo is cloned. Unless given, it is
-`<dir>/<name>`, with the repo's name, where `<dir>` is the first of `~/Developer`, `~/git`,
-`~/src`, `~/code` and `~/Projects` that exists, else your home directory.
-The installer prints the path it chose.
+In order, it:
 
-[`install.sh`](install.sh), in order:
-
-1. installs Homebrew, when neither `/opt/homebrew` nor `/usr/local` holds it
-2. installs macelium, `brew install dbaggott/tap/macelium`
-3. on GitHub, when the state repo can't be read without signing in, signs in
+1. installs Homebrew and macelium, as above
+2. on GitHub, when the state repo can't be read without signing in, signs in
    with `gh auth login`, unless `gh` already is, and runs
    `gh auth setup-git`, so git can fetch it. On another host, it says the
-   host needs a personal access token or a registered SSH key, since account
-   passwords are refused over HTTPS, and leaves the sign-in to git and its
-   credential helper.
-4. clones the state repo to `<path>`
-5. runs `macelium bootstrap <path>`, and exits with its status if it fails
-6. on GitHub, when the state repo was read without signing in and `gh` isn't
-   signed in, offers the same sign-in, so you can push changes from this
-   machine. It defaults to yes.
+   host needs a personal access token or a registered SSH key, and leaves
+   the sign-in to git and its credential helper.
+3. clones the state repo to `<path>`
+4. runs `macelium bootstrap <path>`, and exits with its status if it fails
+5. on GitHub, when the state repo was read without signing in and `gh`
+   isn't signed in, offers the same sign-in, so you can push changes from
+   this machine. It defaults to yes.
+
+It refuses a `<path>` that holds anything but a clone of the state repo,
+before changing anything. A clone counts whichever URL form names its
+remote; on GitHub, in any case.
 
 `gh auth login` asks for its minimum scopes, `repo`, `read:org` and `gist`,
 and `repo` reaches every repo the account can, not only the state repo.
-
-It skips each step already done, so pasting it again picks up where it
-stopped. It refuses a `<path>` that holds anything but a clone of the state
-repo, before changing anything. A clone counts whichever URL form names its
-remote; on GitHub, in any case.
 
 ## The state repo
 

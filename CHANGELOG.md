@@ -14,6 +14,17 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.6.0
+
+- `install.sh` with no argument finds or creates your state repo: it asks
+  whether it is on GitHub or another git host, looks for
+  `<username>/macelium-state` on GitHub, first without a sign-in, and asks
+  the path. With a state repo, it clones and bootstraps it. With none, or an
+  empty one, it captures this Mac with `macelium init`, creates the repo on
+  GitHub with `gh repo create`, private by default, or pushes to the empty
+  one, and bootstraps. Run again, it picks up where it stopped. The README's
+  "Install" leads with it; naming the repo still works as before.
+
 ## 0.5.0
 
 - `macelium init` and `macelium bootstrap` refuse, exit 1, before changing

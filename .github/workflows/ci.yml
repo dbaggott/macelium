@@ -145,6 +145,119 @@ jobs:
             }
           done
 
+      # install.sh with no argument, A1 and A2 of
+      # https://github.com/dbaggott/macelium/issues/21, after the step above,
+      # whose chezmoi config names a macelium checkout, as each of these
+      # leaves it. Each state repo is a local bare repo that git reaches at a
+      # URL on a host other than GitHub. expect answers each prompt by its
+      # text, as above, and `macelium init`'s too, capturing what the runner
+      # has.
+      - name: Install with no argument, an existing repo on another host (A2) and a new one (A1)
+        timeout-minutes: 30
+        env:
+          HOMEBREW_NO_ASK: 1
+        run: |
+          set -euo pipefail
+
+          # Takes the state repo's URL. Runs install.sh with no argument,
+          # answering another host, the URL, the default path, and init's
+          # questions, and exits with its status.
+          run_guided() {
+            STATE_URL=$1 /usr/bin/expect -c '
+              set timeout 300
+              spawn bash install.sh
+              expect {
+                -ex {Choose 1 or 2 [1]: } { send "2\r"; exp_continue }
+                -ex {git URL: } { send "$env(STATE_URL)\r"; exp_continue }
+                -ex {Path for the state repo [} { send "\r"; exp_continue }
+                -re {\nName( \[[^]]*\])?: } { send "macelium CI\r"; exp_continue }
+                -re {\nEmail( \[[^]]*\])?: } { send "ci@example.com\r"; exp_continue }
+                -re {Capture ~/[^\r\n]*\? \[Y/n\] } { send "y\r"; exp_continue }
+                -ex {out of the state repo? [Y/n] } { send "y\r"; exp_continue }
+                timeout { puts "\nexpect: no output for 300s, so a prompt it does not know is waiting"; exit 1 }
+                eof
+              }
+              exit [lindex [wait] 3]
+            '
+          }
+
+          # Takes a log and the lines it must hold, each after its ==>.
+          assert_lines() {
+            local log=$1 line
+            shift
+            for line in "$@"; do
+              grep -qF "==> $line" "$log" || {
+                echo "$log lacks: ==> $line"
+                exit 1
+              }
+            done
+          }
+
+          # A2: a copy of the example, cloned and bootstrapped. The second
+          # run finds the clone, and the refusal of a chezmoi setup that is
+          # not macelium's passes the config the first wrote.
+          src="$RUNNER_TEMP/a2-src" remote="$RUNNER_TEMP/a2.git"
+          url=https://git.example.com/ci/example-state.git
+          git init -q --bare -b main "$remote"
+          cp -R example "$src"
+          git -C "$src" init -q -b main
+          git -C "$src" add -A
+          git -C "$src" -c user.name=ci -c user.email=ci@example.com commit -q -m example
+          git -C "$src" push -q "$remote" main
+          git config --global url."file://$remote".insteadOf "$url"
+
+          run_guided "$url"
+          a2="$RUNNER_TEMP/a2-again.log"
+          run_guided "$url" | tee "$a2"
+          assert_lines "$a2" "Clone: $HOME/Developer/example-state is already a clone of $url" \
+            "macelium bootstrap $HOME/Developer/example-state"
+          if grep -qF "chezmoi setup that is not macelium's" "$a2"; then
+            echo "A2: the second run refused the chezmoi config the first wrote"
+            exit 1
+          fi
+
+          # A1: an empty repo, so install.sh takes the create flow: init
+          # captures the runner, the push, then the bootstrap. Afterwards
+          # plan finds nothing to list in the Homebrew or files sections.
+          # Upgrades available are left out: they follow Homebrew's
+          # releases, not what init captured.
+          remote="$RUNNER_TEMP/a1.git" url=https://git.example.com/ci/state.git
+          git init -q --bare -b main "$remote"
+          git config --global url."file://$remote".insteadOf "$url"
+
+          a1="$RUNNER_TEMP/a1.log"
+          run_guided "$url" | tee "$a1"
+          assert_lines "$a1" "macelium init $HOME/Developer/state" "Pushing $HOME/Developer/state to $url" \
+            "macelium bootstrap $HOME/Developer/state"
+          [[ -n $(git -C "$remote" for-each-ref) ]] || {
+            echo "A1: nothing was pushed"
+            exit 1
+          }
+
+          plan="$RUNNER_TEMP/a1-plan.log"
+          status=0
+          script -q /dev/null macelium plan </dev/null | tr -d '\r' | tee "$plan" || status=$?
+          echo "plan exited $status"
+          [[ $status != 1 ]]
+          for heading in "Files" "Homebrew: listed but not installed" "Homebrew: installed but not listed — keep or remove each"; do
+            if grep -qxF "$heading" "$plan"; then
+              echo "A1: plan lists differences under $heading"
+              exit 1
+            fi
+          done
+
+          # A second run finds the repo pushed and the path its clone, so it
+          # reaches the bootstrap with no init and no push.
+          a1="$RUNNER_TEMP/a1-again.log"
+          run_guided "$url" | tee "$a1"
+          assert_lines "$a1" "Clone: $HOME/Developer/state is already a clone of $url" "macelium bootstrap $HOME/Developer/state"
+          for line in "macelium init" "Pushing"; do
+            if grep -qF "==> $line" "$a1"; then
+              echo "A1: the second run ran: $line"
+              exit 1
+            fi
+          done
+
       # Each bootstrap step's output goes to its log, not the job's.
       - name: Print the bootstrap log
         if: failure()
