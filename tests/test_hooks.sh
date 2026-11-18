@@ -34,7 +34,7 @@ test_hooks_do_not_rerun_when_nothing_changed() {
   assert_status 0
   assert_contains "$out" "No changes."
   run_tty y -- "$tool" apply
-  assert_contains "$out" "Nothing to apply."
+  assert_contains "$out" "No changes."
   [[ $(hook_runs) == 1 ]] || fail "hook ran $(hook_runs) times, expected 1"
 }
 

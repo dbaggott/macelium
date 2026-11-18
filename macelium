@@ -61,7 +61,7 @@
 set -uo pipefail
 
 # A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.7.0"
+VERSION="0.7.1"
 # How brew bundle check names macelium in a state repo's Brewfile, whose line
 # for it README.md ("The Brewfile's macelium line") gives.
 self_formula=dbaggott/tap/macelium
@@ -73,7 +73,6 @@ export HOMEBREW_NO_AUTO_UPDATE=1
 local_brewfile="$HOME/.config/macelium/Brewfile.local"
 # The dotfiles command's per-machine Brewfile, which macelium does not read:
 # plan warns while it exists.
-old_local_brewfile="$HOME/.Brewfile.local"
 state_dir="$HOME/.local/state/macelium"
 # The manifest contract this macelium reads (README.md, "Contract").
 known_contract=1
@@ -1452,9 +1451,6 @@ print_plan() {
   done < <(check_table)
   # A warning counts toward nothing.
   [[ -n $macos_notes ]] && warn "$macos_notes"
-  if [[ -e $old_local_brewfile ]]; then
-    warn "macelium does not read ~/.Brewfile.local: move it to ~/.config/macelium/Brewfile.local"
-  fi
   if [[ -f $local_brewfile && ! -e $state_brewfile ]]; then
     warn "macelium reads ~/.config/macelium/Brewfile.local only with the state repo's Brewfile, and $state_brewfile does not exist: its packages are not checked or installed"
   fi
@@ -1641,7 +1637,6 @@ apply() {
   change=$(items_to_change)
   upgrades=$(count_lines "$outdated_items")
   if ((change + upgrades == 0)); then
-    echo "Nothing to apply."
     return 0
   fi
   ((change > 0)) && scope="$change to change"

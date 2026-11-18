@@ -14,6 +14,11 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.7.1
+
+- Removes duplicate messaging when there's nothing to apply.
+- Internal cleanup post dotfiles -> macelium migration.
+
 ## 0.7.0
 
 - `macelium --help`, `-h` and `macelium help [<command>]` print the commands,
