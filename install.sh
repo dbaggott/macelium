@@ -186,16 +186,16 @@ install_macelium() {
       echo "install.sh: stopped: installing the Command Line Tools needs sudo" >&2
       return 1
     }
-    if ! with_spinner "Installing $label" sudo -n softwareupdate -i "$label"; then
+    # One sudo for both, since the install can outlast sudo's cached
+    # credentials.
+    # shellcheck disable=SC2016 # $1 is the inner shell's
+    if ! with_spinner "Installing $label" sudo -n /bin/sh -c \
+      'softwareupdate -i "$1" && xcode-select --switch /Library/Developer/CommandLineTools' sh "$label"; then
       rm -f "$placeholder"
-      echo "install.sh: stopped: softwareupdate -i $label failed" >&2
+      echo "install.sh: stopped: installing $label failed" >&2
       return 1
     fi
     rm -f "$placeholder"
-    sudo -n xcode-select --switch /Library/Developer/CommandLineTools || {
-      echo "install.sh: stopped: xcode-select --switch /Library/Developer/CommandLineTools failed" >&2
-      return 1
-    }
     echo "==> $label: installed"
   }
 

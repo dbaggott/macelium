@@ -46,7 +46,7 @@ provider:
   says who it is signed in as. With no `macelium-state`, it asks whether
   this is the first time, which creates one, or your repo has another name,
   which it then asks for, as `<owner>/<repo>` or a git URL.
-- **Another host.** It asks the repo's git URL, and stops if git can't read
+- **Another git provider.** It asks the repo's git URL, and stops if git can't read
   it. The host needs a personal access token or a registered SSH key, since
   account passwords are refused over HTTPS; git and its credential helper
   ask for what they need.
@@ -55,9 +55,9 @@ When the default path below already holds a clone of the repo it found, it
 says so and offers to set up this Mac from that clone. Otherwise, before
 cloning or creating, it asks where the state repo goes, and, when the
 directory to hold it is missing, whether to create it, asking the path
-again on a no. The default is `<dir>/<name>`, with the repo's name, where `<dir>` is the first of
-`~/Developer`, `~/git`, `~/src`, `~/code` and `~/Projects` that exists, else
-your home directory.
+again on a no. The default is `<dir>/<name>`, with the repo's name, where
+`<dir>` is the first of `~/Developer`, `~/git`, `~/src`, `~/code` and
+`~/Projects` that exists, else your home directory.
 
 **With a state repo** that has commits, it clones it there and runs
 `macelium bootstrap <path>`. When GitHub read it without a sign-in and `gh`
