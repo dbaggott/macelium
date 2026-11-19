@@ -211,8 +211,9 @@ test_install_signs_in_before_the_clone_when_github_refuses_an_anonymous_read() {
 # repos are bare repos under $sandbox/github, <owner>/<repo>.git, which git
 # reads at their GitHub URL without a sign-in when github_repo makes them
 # public, and after gh auth setup-git otherwise; any other GitHub URL reads
-# nothing. gh is signed out until auth login, which signs in as
-# $STUB_GH_LOGIN when that is set and fails otherwise. Its repo create
+# nothing. gh is signed out until auth login, which signs in as the next of
+# the logins $STUB_GH_LOGIN lists, the last again once they run out, and
+# fails when it is unset; sign_in_as signs it in before a run. Its repo create
 # refuses --private when $STUB_GH_PRIVATE_REFUSED is set, and creates the
 # repo but fails to push to it when $STUB_GH_PUSH_FAILS is; its repo view
 # fails as on a network error when $STUB_GH_VIEW_FAILS is. macelium's init
@@ -231,7 +232,14 @@ expose() {
 }
 case "$1 ${2:-}" in
   "auth status") [[ -e $signed ]] ;;
-  "auth login") [[ -n ${STUB_GH_LOGIN:-} ]] && touch "$signed" ;;
+  "auth login")
+    [[ -n ${STUB_GH_LOGIN:-} ]] || exit 1
+    n=$(($(cat "$STUB_LOG.logins" 2>/dev/null || echo 0) + 1))
+    echo "$n" >"$STUB_LOG.logins"
+    read -ra logins <<<"$STUB_GH_LOGIN"
+    ((n <= ${#logins[@]})) || n=${#logins[@]}
+    printf '%s\n' "${logins[n - 1]}" >"$signed"
+    ;;
   "auth setup-git")
     for repo in "$root"/*/*.git; do
       [[ -e $repo ]] || continue
@@ -239,7 +247,7 @@ case "$1 ${2:-}" in
       expose "${repo%.git}"
     done
     ;;
-  "api user") [[ -e $signed ]] && printf '%s\n' "$STUB_GH_LOGIN" ;;
+  "api user") [[ -e $signed ]] && cat "$signed" ;;
   "repo view")
     [[ -e $signed ]] || exit 1
     [[ -z ${STUB_GH_VIEW_FAILS:-} ]] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
@@ -285,6 +293,11 @@ STUB
   unset STUB_GH_LOGIN STUB_GH_PRIVATE_REFUSED STUB_GH_PUSH_FAILS STUB_GH_VIEW_FAILS
 }
 
+# Takes a login, and has gh signed in as it, as before install.sh runs.
+sign_in_as() {
+  printf '%s\n' "$1" >"$STUB_LOG.signed-in"
+}
+
 # Takes <owner>/<repo>, then public or private, then empty, for a repo with
 # no refs, or nothing, for a copy of the state repo. Makes it on the GitHub
 # guided_mac fakes.
@@ -326,10 +339,12 @@ test_guided_finds_a_public_github_repo_with_no_sign_in() {
   assert_status 0
   # The terminal shows each prompt on the line its answer's echo ends, so the
   # prompts are checked for, not their order.
-  assert_order "$out" "Where is your state repo, or where should a new one go?" "1) GitHub" "2) another git host"
-  assert_contains "$out" "Your GitHub username (leave it empty if you have no account yet: the sign-in can create one):"
-  assert_contains "$out" "Found https://github.com/me/macelium-state. Set up this Mac from it? [Y/n]"
-  assert_contains "$out" "Path for the state repo [$HOME/Developer/macelium-state]:"
+  assert_order "$out" "Welcome to Macelium!  You will now be guided through the setup." \
+    "What source control provider do you want to use for managing your environment?" "1) GitHub" "2) another git provider"
+  assert_contains "$out" "GitHub username (empty if you do not have an account yet):"
+  assert_contains "$out" "Found https://github.com/me/macelium-state."
+  assert_contains "$out" "Set up this Mac from it? [Y/n]"
+  assert_contains "$out" "Where do you want to clone the state repo? [$HOME/Developer/macelium-state]:"
   assert_order "$out" "==> Cloning me/macelium-state to $HOME/Developer/macelium-state" \
     "==> macelium bootstrap $HOME/Developer/macelium-state" \
     "Sign in to GitHub with gh, so you can push changes from this machine? [Y/n]"
@@ -357,19 +372,21 @@ test_guided_finds_a_private_github_repo_after_the_sign_in() {
   assert_status 0
   assert_order "$STUB_LOG" "gh auth login" "gh auth setup-git" "gh api user" "gh repo view me/macelium-state" \
     "macelium bootstrap $HOME/macelium-state tty=yes"
-  assert_not_contains "$out" "Found https://github.com"
+  assert_order "$out" "No public me/macelium-state found; signing in to look for a private one." \
+    "==> Signed in to GitHub as me" "Found https://github.com/me/macelium-state."
   assert_not_contains "$out" "so you can push changes from this machine"
   [[ -f $HOME/macelium-state/macelium.conf ]] || fail "not cloned"
 }
 
-test_guided_signs_in_straight_away_with_no_username() {
+test_guided_has_an_account_created_with_no_username() {
   guided_mac
   export STUB_GH_LOGIN=me
   github_repo me/macelium-state private
-  run_tty '' '' '' -- bash "$installer"
+  run_tty '' '' '' '' -- bash "$installer"
   assert_status 0
-  assert_contains "$out" "Your GitHub username"
-  assert_order "$STUB_LOG" "gh auth login" "gh api user"
+  assert_order "$out" "You'll need a GitHub account. Opening https://github.com/signup in your browser." \
+    "Create the account there, then come back and press Enter to sign in" "==> Signed in to GitHub as me"
+  assert_order "$STUB_LOG" "open https://github.com/signup" "gh auth login" "gh api user"
   assert_contains "$STUB_LOG" "macelium bootstrap $HOME/macelium-state tty=yes"
 }
 
@@ -382,7 +399,7 @@ test_guided_takes_another_name_when_none_is_found() {
   assert_order "$out" \
     "No macelium-state repo found for me. Are you setting this up for the first time, or is your repo named something else?" \
     "1) first time: capture this Mac into a new me/macelium-state" "2) something else: give its name or URL"
-  assert_contains "$out" "Path for the state repo [$HOME/dotfiles]:"
+  assert_contains "$out" "Where do you want to clone the state repo? [$HOME/dotfiles]:"
   [[ -f $HOME/dotfiles/macelium.conf ]] || fail "not cloned"
   assert_contains "$STUB_LOG" "macelium bootstrap $HOME/dotfiles tty=yes"
 }
@@ -402,7 +419,7 @@ test_guided_creates_a_private_github_repo_the_first_time_then_resumes_at_the_boo
 
   forget_private_repo me/macelium-state
   : >"$STUB_LOG"
-  run_tty '' me '' -- bash "$installer"
+  run_tty '' '' '' -- bash "$installer"
   assert_status 0
   assert_contains "$out" "==> Clone: $HOME/macelium-state is already a clone of me/macelium-state"
   assert_not_contains "$STUB_LOG" "macelium init"
@@ -454,7 +471,7 @@ test_guided_resumes_at_the_push_when_gh_created_the_repo_but_did_not_push() {
   unset STUB_GH_PUSH_FAILS
   forget_private_repo me/macelium-state
   : >"$STUB_LOG"
-  run_tty '' me '' -- bash "$installer"
+  run_tty '' '' '' -- bash "$installer"
   assert_status 0
   assert_contains "$out" "==> macelium init: $HOME/macelium-state already holds the new state repo"
   assert_order "$out" "==> Pushing $HOME/macelium-state to me/macelium-state" "==> macelium bootstrap"
@@ -497,7 +514,8 @@ test_guided_confirms_an_empty_public_github_repo_before_capturing_into_it() {
   github_repo me/macelium-state public empty
   run_tty '' me '' '' -- bash "$installer"
   assert_status 0
-  assert_contains "$out" "Found https://github.com/me/macelium-state, with nothing in it yet. Capture this Mac into it? [Y/n]"
+  assert_contains "$out" "Found https://github.com/me/macelium-state, with nothing in it yet."
+  assert_contains "$out" "Capture this Mac into it? [Y/n]"
   assert_order "$STUB_LOG" "gh auth login" "macelium init --public $HOME/macelium-state tty=yes" \
     "macelium bootstrap $HOME/macelium-state tty=yes"
   assert_not_contains "$STUB_LOG" "gh repo create"
@@ -554,10 +572,11 @@ test_guided_refuses_a_path_holding_something_else_before_init() {
 test_guided_clones_from_another_host_to_the_path_given() {
   guided_mac
   # shellcheck disable=SC2088 # the answer's ~, for install.sh to expand
-  run_tty 2 https://git.example.org/me/state '~/elsewhere/state' -- bash "$installer"
+  run_tty 2 https://git.example.org/me/state '~/elsewhere/state' '' -- bash "$installer"
   assert_status 0
   assert_order "$out" "==> Git host sign-in: needs a personal access token or a registered SSH key" "The state repo's git URL:"
-  assert_contains "$out" "Path for the state repo [$HOME/state]:"
+  assert_contains "$out" "Where do you want to clone the state repo? [$HOME/state]:"
+  assert_contains "$out" "The path $HOME/elsewhere does not exist, should I create it? [Y/n]"
   assert_contains "$out" "==> Cloning https://git.example.org/me/state to $HOME/elsewhere/state"
   [[ $(grep -c 'sign-in: needs' "$out") == 1 ]] || fail "the sign-in line is not printed once"
   [[ -f $HOME/elsewhere/state/macelium.conf ]] || fail "not cloned"
@@ -571,7 +590,7 @@ test_guided_stops_at_another_host_git_cannot_read() {
   run_tty 2 https://git.example.org/me/missing "$eof" "$eof" -- bash "$installer"
   assert_status 1
   assert_contains "$out" "install.sh: stopped: git can't read https://git.example.org/me/missing. git.example.org sign-in: needs a personal access token or a registered SSH key"
-  assert_not_contains "$out" "Path for the state repo"
+  assert_not_contains "$out" "Where do you want to clone the state repo?"
   assert_not_contains "$STUB_LOG" "macelium init"
   assert_not_contains "$STUB_LOG" "macelium bootstrap"
 }
@@ -610,6 +629,7 @@ test_guided_resumes_at_the_push_on_another_host() {
 # needs set up first. Fails the test unless install.sh stops, exit 1, with
 # nothing created.
 assert_stops_at_end_of_file() {
+  rm -f "$STUB_LOG.signed-in"
   run_tty "$@" "$eof" "$eof" -- bash "$installer"
   assert_status 1
   assert_contains "$out" "install.sh: stopped: no answer"
@@ -636,4 +656,122 @@ test_guided_stops_at_end_of_file_on_the_first_time_question_another_name_and_vis
   assert_stops_at_end_of_file '' me 2
   assert_stops_at_end_of_file '' me 1
   assert_stops_at_end_of_file '' me 1 ''
+}
+
+# Who it signs in as.
+
+test_guided_confirms_the_account_gh_is_signed_in_as() {
+  guided_mac
+  sign_in_as me
+  github_repo me/macelium-state private
+  run_tty '' '' '' -- bash "$installer"
+  assert_status 0
+  assert_order "$out" "gh is signed in to GitHub as me." "Continue as me?" "1) yes" "2) no, sign in to another account" \
+    "==> Signed in to GitHub as me" "Found https://github.com/me/macelium-state."
+  assert_not_contains "$out" "GitHub username"
+  assert_not_contains "$STUB_LOG" "gh auth login"
+  assert_contains "$STUB_LOG" "macelium bootstrap $HOME/macelium-state tty=yes"
+}
+
+test_guided_signs_in_to_another_account_when_the_signed_in_one_is_declined() {
+  guided_mac
+  sign_in_as me
+  export STUB_GH_LOGIN=bob
+  github_repo bob/macelium-state private
+  run_tty '' 2 '' -- bash "$installer"
+  assert_status 0
+  assert_order "$out" "Continue as me?" "==> Signing in to GitHub" "==> Signed in to GitHub as bob"
+  assert_contains "$STUB_LOG" "macelium bootstrap $HOME/macelium-state tty=yes"
+  assert_contains "$STUB_LOG" "gh repo view bob/macelium-state"
+}
+
+test_guided_signs_in_as_the_username_given_when_gh_signs_in_as_another() {
+  guided_mac
+  export STUB_GH_LOGIN="me bob"
+  github_repo bob/macelium-state private
+  run_tty '' bob '' '' -- bash "$installer"
+  assert_status 0
+  assert_order "$out" "==> Signed in to GitHub as me" "gh is signed in as me, not bob." "1) sign in as bob" "2) continue as me" \
+    "==> Signing in to GitHub as bob" "==> Signed in to GitHub as bob"
+  assert_contains "$STUB_LOG" "gh repo view bob/macelium-state"
+}
+
+test_guided_goes_on_as_the_signed_in_account_when_asked_to() {
+  guided_mac
+  export STUB_GH_LOGIN=me
+  github_repo me/macelium-state private
+  run_tty '' bob 2 '' -- bash "$installer"
+  assert_status 0
+  assert_contains "$out" "gh is signed in as me, not bob."
+  assert_contains "$STUB_LOG" "gh repo view me/macelium-state"
+  [[ $(grep -c 'gh auth login' "$STUB_LOG") == 1 ]] || fail "it signed in again"
+}
+
+test_guided_stops_when_the_second_sign_in_is_not_the_username_given() {
+  guided_mac
+  export STUB_GH_LOGIN=me
+  run_tty '' bob 1 "$eof" "$eof" -- bash "$installer"
+  assert_status 1
+  assert_contains "$out" "install.sh: stopped: signed in as me, not bob"
+  assert_not_contains "$STUB_LOG" "macelium init"
+  assert_not_contains "$STUB_LOG" "macelium bootstrap"
+}
+
+# A clone already at the default path.
+
+test_guided_offers_a_clone_already_at_the_default_path() {
+  guided_mac
+  github_repo me/macelium-state public
+  git clone -q https://github.com/me/macelium-state "$HOME/macelium-state"
+  run_tty '' me '' n -- bash "$installer"
+  assert_status 0
+  assert_contains "$out" "Found https://github.com/me/macelium-state."
+  assert_contains "$out" "It is already cloned at $HOME/macelium-state. Set up this Mac from that clone? [Y/n]"
+  assert_contains "$out" "==> Clone: $HOME/macelium-state is already a clone of me/macelium-state"
+  assert_not_contains "$out" "Where do you want to clone"
+  assert_contains "$STUB_LOG" "macelium bootstrap $HOME/macelium-state tty=yes"
+}
+
+test_guided_asks_the_path_when_the_clone_at_the_default_path_is_declined() {
+  guided_mac
+  github_repo me/macelium-state public
+  git clone -q https://github.com/me/macelium-state "$HOME/macelium-state"
+  run_tty '' me n "$HOME/other" n -- bash "$installer"
+  assert_status 0
+  assert_contains "$out" "Where do you want to clone the state repo? [$HOME/macelium-state]:"
+  assert_contains "$STUB_LOG" "macelium bootstrap $HOME/other tty=yes"
+}
+
+test_guided_offers_a_clone_of_a_private_repo_at_the_default_path() {
+  guided_mac
+  sign_in_as me
+  github_repo me/macelium-state private
+  git clone -q "$sandbox/github/me/macelium-state.git" "$HOME/macelium-state"
+  git -C "$HOME/macelium-state" remote set-url origin https://github.com/me/macelium-state
+  run_tty '' '' '' -- bash "$installer"
+  assert_status 0
+  assert_order "$out" "Found https://github.com/me/macelium-state." "It is already cloned at $HOME/macelium-state."
+  assert_contains "$STUB_LOG" "macelium bootstrap $HOME/macelium-state tty=yes"
+}
+
+# A path whose directory is missing.
+
+test_guided_asks_the_path_again_when_creating_its_directory_is_declined() {
+  guided_mac
+  github_repo me/macelium-state public
+  run_tty '' me '' "$HOME/a/state" n "$HOME/b/state" y n -- bash "$installer"
+  assert_status 0
+  assert_contains "$out" "The path $HOME/a does not exist, should I create it? [Y/n]"
+  assert_contains "$out" "The path $HOME/b does not exist, should I create it? [Y/n]"
+  [[ ! -e $HOME/a ]] || fail "created $HOME/a"
+  assert_contains "$STUB_LOG" "macelium bootstrap $HOME/b/state tty=yes"
+}
+
+test_guided_says_what_init_records_before_it_runs() {
+  guided_mac
+  export STUB_GH_LOGIN=me
+  run_tty '' me 1 '' '' -- bash "$installer"
+  assert_status 0
+  assert_contains "$out" "Where do you want to keep the new state repo? [$HOME/macelium-state]:"
+  assert_order "$out" "Macelium will now record your computer's current setup" "==> macelium init $HOME/macelium-state"
 }

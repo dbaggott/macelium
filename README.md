@@ -26,25 +26,36 @@ curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install
 
 [`install.sh`](install.sh) first installs Homebrew, when neither
 `/opt/homebrew` nor `/usr/local` holds it, and macelium,
-`brew install dbaggott/tap/macelium`. Then it asks where your state repo is,
-on GitHub (the default) or another git host:
+`brew install dbaggott/tap/macelium`. Before Homebrew, it installs the
+Command Line Tools for Xcode with `softwareupdate` when `xcode-select -p`
+finds none, with a spinner and the time so far, since `softwareupdate` shows
+no progress while it downloads and installs them. Then it asks which source
+control provider holds your state repo, GitHub (the default) or another git
+provider:
 
-- **GitHub.** It asks your username, and looks for
-  `<username>/macelium-state`, without signing in. Leave the username empty
-  if you have no account yet: it signs in with `gh auth login`, whose
-  browser page can create one. When the repo reads without a sign-in, it
-  asks you to confirm it, and asks your repo's name or URL if you don't.
-  When it doesn't read, it signs in and asks `gh`. With no
-  `macelium-state`, it asks whether this is the first time, which creates
-  one, or your repo has another name, which it then asks for, as
-  `<owner>/<repo>` or a git URL.
+- **GitHub.** When `gh` is already signed in, it says as whom and asks
+  whether to continue as that account or sign in to another. Otherwise it
+  asks your username, and looks for `<username>/macelium-state` without
+  signing in. Leave the username empty if you have no account yet: it opens
+  `https://github.com/signup`, waits for you to press Enter, then signs in
+  with `gh auth login`. When the repo reads without a sign-in, it says it
+  found it and asks you to confirm it, and asks your repo's name or URL if
+  you don't. When it doesn't read, it signs in and asks `gh`; when the
+  account you sign in as is not the username you gave, it asks whether to
+  sign in as that username or continue as the account. After any sign-in it
+  says who it is signed in as. With no `macelium-state`, it asks whether
+  this is the first time, which creates one, or your repo has another name,
+  which it then asks for, as `<owner>/<repo>` or a git URL.
 - **Another host.** It asks the repo's git URL, and stops if git can't read
   it. The host needs a personal access token or a registered SSH key, since
   account passwords are refused over HTTPS; git and its credential helper
   ask for what they need.
 
-Before cloning or creating, it asks where the state repo goes. The default
-is `<dir>/<name>`, with the repo's name, where `<dir>` is the first of
+When the default path below already holds a clone of the repo it found, it
+says so and offers to set up this Mac from that clone. Otherwise, before
+cloning or creating, it asks where the state repo goes, and, when the
+directory to hold it is missing, whether to create it, asking the path
+again on a no. The default is `<dir>/<name>`, with the repo's name, where `<dir>` is the first of
 `~/Developer`, `~/git`, `~/src`, `~/code` and `~/Projects` that exists, else
 your home directory.
 
@@ -350,9 +361,9 @@ again at any point after. It opens with a banner of mycelium spreading and
 fruiting, in color unless `NO_COLOR` is set, then refuses a chezmoi setup
 that is not macelium's, as `init` does (below). It checks what it needs from
 macOS, App Management and Full Disk Access for the terminal, and stops naming
-each that is missing. When `fdesetup status` says FileVault is off, it warns,
-since FileVault is what protects the state repo's files on the Mac at rest,
-and goes on. It then asks for sudo once for its own steps, prints
+each that is missing. When `fdesetup status` says FileVault is off, it says
+so, since FileVault is what protects the state repo's files on the Mac at
+rest, and goes on. It then asks for sudo once for its own steps, prints
 the manifest's `init_notes` when the machine has no chezmoi config, runs
 `chezmoi init`, and applies the files. Each chezmoi script, and each of
 `apply`'s steps, then runs as its own step, so one that fails stops none

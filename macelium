@@ -61,7 +61,7 @@
 set -uo pipefail
 
 # A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.7.2"
+VERSION="0.8.0"
 # How brew bundle check names macelium in a state repo's Brewfile, whose line
 # for it README.md ("The Brewfile's macelium line") gives.
 self_formula=dbaggott/tap/macelium
@@ -1822,14 +1822,16 @@ check_preflight() {
   fi
 }
 
-# Warns, at once and among the warnings at the end, when FileVault is off.
+# Says so, at once and among the warnings at the end, when FileVault is off.
 # Says nothing when fdesetup fails or prints anything else.
 check_filevault() {
   # Its first line only, as it may print more after it.
   [[ $(fdesetup status 2>/dev/null | head -n 1) == 'FileVault is Off.' ]] || return 0
-  local line='FileVault is off, and it is what protects the files the state repo puts on this Mac while the Mac is off: turn it on in System Settings -> Privacy & Security -> FileVault.'
-  printf '\nWarning: %s\n' "$line" >&2
-  warn "$line"
+  printf '\n%s\n' \
+    "FYI: Your macOS FileVault is off. Enabling it is generally considered a security" \
+    "best practice. If you want it, enable it through System Settings. Macelium will" \
+    "work either way, and you can enable it after this process completes." >&2
+  warn 'FileVault is off: enable it through System Settings -> Privacy & Security -> FileVault if you want it.'
 }
 
 # Asks for the password once for macelium's own steps, and keeps sudo's
@@ -1839,15 +1841,10 @@ start_sudo() {
   local keeper
   enable_touch_id_sudo
   echo
-  echo "The bootstrap installs your applications, and the first run can take a long time."
-  # sudo reuses credentials it was given recently, in this terminal, without asking.
-  if ! sudo -n -v 2>/dev/null; then
-    echo "You'll be asked to authenticate now."
-  fi
-  if [[ -e $state_brewfile ]]; then
-    echo "Homebrew will ask you to authenticate again during each brew bundle step that"
-    echo "installs an application needing sudo, once in each step."
-  fi
+  echo "Macelium will now configure your computer according to your specifications. This"
+  echo "includes installing your Homebrew-managed applications and, depending on what you"
+  echo "are installing, this may take a long time. You'll be prompted to enter your"
+  echo "password one or more times as part of installation."
   echo
   sudo -v || return 1
   # The keeper is off the terminal, since under use_pty, sudo's default, sudo
