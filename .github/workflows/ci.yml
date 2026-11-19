@@ -175,7 +175,7 @@ jobs:
               expect {
                 -ex {Choose 1 or 2 [1]: } { send "2\r"; exp_continue }
                 -ex {git URL: } { send "$env(STATE_URL)\r"; exp_continue }
-                -ex {Path for the state repo [} { send "\r"; exp_continue }
+                -re {Where do you want to (clone|keep) the [^\[]*\[} { send "\r"; exp_continue }
                 -re {\nName( \[[^]]*\])?: } { send "macelium CI\r"; exp_continue }
                 -re {\nEmail( \[[^]]*\])?: } { send "ci@example.com\r"; exp_continue }
                 -re {Capture ~/[^\r\n]*\? \[Y/n\] } { send "y\r"; exp_continue }
