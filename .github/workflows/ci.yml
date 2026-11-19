@@ -166,9 +166,8 @@ jobs:
           set -euo pipefail
 
           # Takes the state repo's URL. Runs install.sh with no argument,
-          # answering another host, the URL, the default path or the clone already
-          # there, and init's
-          # questions, and exits with its status.
+          # answering another host, the URL, the default path or the clone
+          # already there, and init's questions, and exits with its status.
           run_guided() {
             STATE_URL=$1 /usr/bin/expect -c '
               set timeout 300
