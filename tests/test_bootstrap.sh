@@ -71,6 +71,15 @@ test_banner_without_color_under_no_color() {
   if grep -qE $'\033\\[[0-9;]*m' "$out"; then fail "a color escape under NO_COLOR"; fi
 }
 
+test_banner_names_the_version_after_macelium() {
+  local version
+  version=$(grep -E '^VERSION=' "$tool" | head -n 1 | cut -d '"' -f 2)
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner' _ "$tool"
+  assert_status 0
+  assert_contains "$out" "m a c e l i u m  $version"
+}
+
 test_banner_ends_on_a_blank_line() {
   # shellcheck disable=SC2016 # expanded by the inner bash
   run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner; echo after' _ "$tool"

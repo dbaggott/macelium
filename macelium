@@ -2273,8 +2273,8 @@ banner_signature=dnbg
 
 # Plays the banner on the terminal: a spore drifts down onto a ground line,
 # mycelium spreads from it below the line, spelling banner_signature into
-# a thread, then mushrooms fruit above it, and macelium's name follows, and a
-# blank line. It is 64 columns by 15 rows, in color unless NO_COLOR is set,
+# a thread, then mushrooms fruit above it, and macelium's name and version
+# follow, and a blank line. It is 64 columns by 15 rows, in color unless NO_COLOR is set,
 # and a smaller terminal gets none. Each frame redraws the last by moving up
 # over it.
 print_banner() {
@@ -2399,7 +2399,7 @@ print_banner() {
     banner_frame 0.11
   done
 
-  printf '\n%24s%s%s%s\n\n' '' "$st_w" 'm a c e l i u m' "$st_0"
+  printf '\n%24s%s%s%s  %s%s%s\n\n' '' "$st_w" 'm a c e l i u m' "$st_0" "$st_h" "$VERSION" "$st_0"
   printf '\033[?25h'
   eval "${exit_trap:-trap - EXIT}"
 }

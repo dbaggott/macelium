@@ -199,7 +199,27 @@ install_macelium() {
     echo "==> $label: installed"
   }
 
-  # Installs Homebrew and macelium, each unless it already is.
+  # Upgrades macelium when its tap has a newer one, and says which version
+  # this run goes on with. brew upgrade refreshes the tap first, as brew does
+  # before any command naming a tap's formula, and leaves a macelium that is
+  # the latest as it is.
+  upgrade_macelium() {
+    local before after
+    before=$(macelium --version)
+    if ! with_spinner "Checking for a newer macelium" brew upgrade dbaggott/tap/macelium; then
+      echo "install.sh: stopped: brew upgrade dbaggott/tap/macelium failed" >&2
+      return 1
+    fi
+    after=$(macelium --version)
+    if [[ $after == "$before" ]]; then
+      echo "==> macelium: already installed, the latest version (${after#macelium })"
+    else
+      echo "==> macelium: upgraded from ${before#macelium } to ${after#macelium }"
+    fi
+  }
+
+  # Installs Homebrew and macelium, each unless it already is, and upgrades
+  # a macelium that is to the latest.
   install_tools() {
     if command -v brew >/dev/null; then
       echo "==> Homebrew: already installed"
@@ -224,7 +244,7 @@ install_macelium() {
     fi
 
     if brew list --formula dbaggott/tap/macelium >/dev/null 2>&1; then
-      echo "==> macelium: already installed"
+      upgrade_macelium || return 1
     else
       echo "==> Installing macelium"
       brew install dbaggott/tap/macelium </dev/tty || {

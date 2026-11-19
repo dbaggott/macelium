@@ -14,6 +14,12 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## Unreleased
+
+- `install.sh` upgrades a macelium already installed to the latest, and
+  says which version it goes on with, before it bootstraps.
+- `bootstrap`'s banner shows macelium's version after its name.
+
 ## 0.8.0
 
 - The guided `install.sh` installs the Command Line Tools for Xcode itself,
