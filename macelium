@@ -2274,9 +2274,9 @@ banner_signature=dnbg
 # Plays the banner on the terminal: a spore drifts down onto a ground line,
 # mycelium spreads from it below the line, spelling banner_signature into
 # a thread, then mushrooms fruit above it, and macelium's name and version
-# follow, and a blank line. It is 64 columns by 15 rows, in color unless NO_COLOR is set,
-# and a smaller terminal gets none. Each frame redraws the last by moving up
-# over it.
+# follow, and a blank line. It is 64 columns by 15 rows, in color unless
+# NO_COLOR is set, and a smaller terminal gets none. Each frame redraws the
+# last by moving up over it.
 print_banner() {
   local width=64 rows=12 ground=6 grid=() kind=() blank='' surface='' drawn=no
   local tip_r=() tip_c=() tip_d=() tip_v=() i r c d n nr nc ch dr step tick s

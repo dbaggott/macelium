@@ -16,8 +16,8 @@ contract than its own.
 
 ## Unreleased
 
-- `install.sh` upgrades a macelium already installed to the latest, and
-  says which version it goes on with, before it bootstraps.
+- `install.sh` upgrades a macelium already installed to the latest before
+  it bootstraps, and says whether it upgraded and to which version.
 - `bootstrap`'s banner shows macelium's version after its name.
 
 ## 0.8.0

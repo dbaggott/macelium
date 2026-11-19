@@ -12,13 +12,13 @@ run_installer() {
 }
 
 # A state repo that https://github.com/example/state clones, and so do
-# https://git.example.org/me/state and its SSH forms; a brew whose
-# `list` fails until `install` has run, and whose `upgrade` fails when
-# $STUB_BREW_UPGRADE_FAILS is set and otherwise moves macelium to
-# $STUB_MACELIUM_LATEST when that is set; a gh that records its call and fails,
-# so a test never signs in; and a macelium that prints its version for
-# --version, 1.0.0 until an upgrade, and otherwise records its call and
-# whether stdin is a terminal, and exits $STUB_MACELIUM_STATUS.
+# https://git.example.org/me/state and its SSH forms; a brew whose `list`
+# fails until `install` has run, with `--versions` naming macelium 1.0.0 until
+# an upgrade, and whose `upgrade` fails when $STUB_BREW_UPGRADE_FAILS is set
+# and otherwise moves macelium to $STUB_MACELIUM_LATEST when that is set; a gh
+# that records its call and fails, so a test never signs in; and a macelium
+# that records its call and whether stdin is a terminal, and exits
+# $STUB_MACELIUM_STATUS.
 installable_state() {
   make_state macelium.conf $'contract 1\n'
   local form
@@ -28,10 +28,6 @@ installable_state() {
   done
   cat >"$sandbox/bin/macelium" <<'STUB'
 #!/bin/bash
-if [[ $1 == --version ]]; then
-  echo "macelium $(cat "$STUB_LOG.version" 2>/dev/null || echo 1.0.0)"
-  exit
-fi
 tty=no
 [[ -t 0 ]] && tty=yes
 echo "macelium $* tty=$tty" >>"$STUB_LOG"
@@ -42,7 +38,10 @@ STUB
 echo "brew $*" >>"$STUB_LOG"
 case $1 in
   install) touch "$STUB_LOG.installed" ;;
-  list) [[ -e $STUB_LOG.installed ]] ;;
+  list)
+    [[ -e $STUB_LOG.installed ]] || exit 1
+    [[ $2 != --versions ]] || echo "macelium $(cat "$STUB_LOG.version" 2>/dev/null || echo 1.0.0)"
+    ;;
   upgrade)
     if [[ -n ${STUB_BREW_UPGRADE_FAILS:-} ]]; then
       echo "Error: the upgrade failed" >&2
@@ -314,10 +313,6 @@ esac
 STUB
   cat >"$sandbox/bin/macelium" <<'STUB'
 #!/bin/bash
-if [[ $1 == --version ]]; then
-  echo "macelium $(cat "$STUB_LOG.version" 2>/dev/null || echo 1.0.0)"
-  exit
-fi
 tty=no
 [[ -t 0 ]] && tty=yes
 echo "macelium $* tty=$tty" >>"$STUB_LOG"

@@ -28,7 +28,7 @@ curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install
 `/opt/homebrew` nor `/usr/local` holds it, and macelium,
 `brew install dbaggott/tap/macelium`. A macelium already installed is
 upgraded to the latest, `brew upgrade dbaggott/tap/macelium`, and it says
-which version it goes on with. Before Homebrew, it installs the
+whether it upgraded and to which version. Before Homebrew, it installs the
 Command Line Tools for Xcode with `softwareupdate` when `xcode-select -p`
 finds none, with a spinner and the time so far, since `softwareupdate` shows
 no progress while it downloads and installs them. Then it asks which source
@@ -360,8 +360,9 @@ left to `brew bundle` with the rest. When
 **`bootstrap`** sets up a machine from `<checkout>`, which must hold
 `macelium.conf`, or else from the checkout chezmoi's config names. It can run
 again at any point after. It opens with a banner of mycelium spreading and
-fruiting, and macelium's name and version, in color unless `NO_COLOR` is set, then refuses a chezmoi setup
-that is not macelium's, as `init` does (below). It checks what it needs from
+fruiting, and macelium's name and version, in color unless `NO_COLOR` is
+set, then refuses a chezmoi setup that is not macelium's, as `init` does
+(below). It checks what it needs from
 macOS, App Management and Full Disk Access for the terminal, and stops naming
 each that is missing. When `fdesetup status` says FileVault is off, it says
 so, since FileVault is what protects the state repo's files on the Mac at

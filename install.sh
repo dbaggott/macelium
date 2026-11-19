@@ -205,16 +205,16 @@ install_macelium() {
   # minutes, and leaves a macelium that is the latest as it is.
   upgrade_macelium() {
     local before after
-    before=$(macelium --version)
-    if ! with_spinner "Checking for a newer macelium" brew upgrade dbaggott/tap/macelium; then
+    before=$(brew list --versions dbaggott/tap/macelium)
+    if ! with_spinner "Upgrading macelium if a newer one is out" brew upgrade dbaggott/tap/macelium; then
       echo "install.sh: stopped: brew upgrade dbaggott/tap/macelium failed" >&2
       return 1
     fi
-    after=$(macelium --version)
+    after=$(brew list --versions dbaggott/tap/macelium)
     if [[ $after == "$before" ]]; then
-      echo "==> macelium: already installed, the latest version (${after#macelium })"
+      echo "==> macelium: already installed, the latest version (${after##* })"
     else
-      echo "==> macelium: upgraded from ${before#macelium } to ${after#macelium }"
+      echo "==> macelium: upgraded from ${before##* } to ${after##* }"
     fi
   }
 
