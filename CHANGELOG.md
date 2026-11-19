@@ -14,6 +14,25 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.8.0
+
+- The guided `install.sh` installs the Command Line Tools for Xcode itself,
+  before Homebrew, with a spinner and the time so far, in place of
+  Homebrew's installer, which shows no progress while they download.
+- The guided `install.sh` opens with a welcome, and asks which source control
+  provider holds your environment.
+- On GitHub, a `gh` already signed in is shown and confirmed, or switched,
+  before anything else; with no username it opens GitHub's sign-up page
+  before signing in; a sign-in as an account other than the username given
+  asks whether to sign in as that username; and every sign-in says who it
+  is signed in as.
+- It says when it found the state repo, and when the default path already
+  holds a clone of it, and offers that clone.
+- It asks `Where do you want to clone the state repo?`, and offers to create
+  a missing directory to hold it.
+- Before `macelium init`, it says what init records.
+- `bootstrap`'s FileVault warning and its message before sudo are reworded.
+
 ## 0.7.2
 
 - The loop that keeps sudo's credentials fresh during `macelium bootstrap`

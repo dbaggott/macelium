@@ -81,28 +81,12 @@ test_banner_ends_on_a_blank_line() {
 
 # What the bootstrap says before sudo asks.
 
-homebrew_asks_text='Homebrew will ask you to authenticate again'
-
-test_bootstrap_with_a_brewfile_says_homebrew_asks_again() {
+test_bootstrap_says_what_it_does_before_sudo_asks() {
   make_state macelium.conf $'contract 1\n' Brewfile $'cask "example"\n'
-  run_tty -- "$tool" bootstrap "$state"
-  assert_order "$out" "$homebrew_asks_text" "==> chezmoi init"
-}
-
-test_bootstrap_says_when_it_asks_for_the_password() {
-  make_state macelium.conf $'contract 1\n'
   export STUB_SUDO_ASKS=1
   run_tty -- "$tool" bootstrap "$state"
-  assert_order "$out" "You'll be asked to authenticate now." "STUB sudo Password:"
-  assert_not_contains "$out" "$homebrew_asks_text"
-}
-
-test_bootstrap_with_cached_credentials_and_no_brewfile_says_neither() {
-  make_state macelium.conf $'contract 1\n'
-  run_tty -- "$tool" bootstrap "$state"
-  assert_contains "$out" "==> chezmoi init"
-  assert_not_contains "$out" "You'll be asked to authenticate"
-  assert_not_contains "$out" "$homebrew_asks_text"
+  assert_order "$out" "Macelium will now configure your computer according to your specifications." \
+    "password one or more times as part of installation." "STUB sudo Password:"
 }
 
 # A logged step's status line, its sudo detection, and its output.
@@ -436,13 +420,13 @@ test_bootstrap_warns_when_filevault_is_off_and_goes_on() {
   make_state macelium.conf $'contract 1\n'
   export STUB_FDESETUP_STATUS='FileVault is Off.'
   run_tty -- "$tool" bootstrap "$state"
-  assert_order "$out" "Warning: FileVault is off" "==> chezmoi init" "Steps:"
-  sed -n '/^Steps:/,$p' "$out" | grep -qF "Warning: FileVault is off" || fail "no FileVault warning at the end"
-  assert_contains "$out" "System Settings -> Privacy & Security -> FileVault"
+  assert_order "$out" "FYI: Your macOS FileVault is off." "Macelium will now configure your computer" "==> chezmoi init" "Steps:"
+  sed -n '/^Steps:/,$p' "$out" | grep -qF "FileVault is off: enable it through System Settings -> Privacy & Security -> FileVault" ||
+    fail "no FileVault warning at the end"
   assert_contains "$out" "Bootstrap complete, with 1 warning."
   export STUB_FDESETUP_STATUS=$'FileVault is Off.\nA line after it.'
   run_tty -- "$tool" bootstrap "$state"
-  assert_contains "$out" "Warning: FileVault is off"
+  assert_contains "$out" "FYI: Your macOS FileVault is off."
 }
 
 test_bootstrap_says_nothing_of_filevault_when_on_or_unknown() {

@@ -166,8 +166,8 @@ jobs:
           set -euo pipefail
 
           # Takes the state repo's URL. Runs install.sh with no argument,
-          # answering another host, the URL, the default path, and init's
-          # questions, and exits with its status.
+          # answering another host, the URL, the default path or the clone
+          # already there, and init's questions, and exits with its status.
           run_guided() {
             STATE_URL=$1 /usr/bin/expect -c '
               set timeout 300
@@ -175,7 +175,8 @@ jobs:
               expect {
                 -ex {Choose 1 or 2 [1]: } { send "2\r"; exp_continue }
                 -ex {git URL: } { send "$env(STATE_URL)\r"; exp_continue }
-                -ex {Path for the state repo [} { send "\r"; exp_continue }
+                -re {Where do you want to (clone|keep) the [^\[]*\[} { send "\r"; exp_continue }
+                -ex {Set up this Mac from that clone? [Y/n] } { send "y\r"; exp_continue }
                 -re {\nName( \[[^]]*\])?: } { send "macelium CI\r"; exp_continue }
                 -re {\nEmail( \[[^]]*\])?: } { send "ci@example.com\r"; exp_continue }
                 -re {Capture ~/[^\r\n]*\? \[Y/n\] } { send "y\r"; exp_continue }
