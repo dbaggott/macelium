@@ -200,9 +200,9 @@ install_macelium() {
   }
 
   # Upgrades macelium when its tap has a newer one, and says which version
-  # this run goes on with. brew upgrade refreshes the tap first, as brew does
-  # before any command naming a tap's formula, and leaves a macelium that is
-  # the latest as it is.
+  # this run goes on with. brew upgrade refreshes the tap first, as it does
+  # for any command naming a tap's formula unless it did so in the last five
+  # minutes, and leaves a macelium that is the latest as it is.
   upgrade_macelium() {
     local before after
     before=$(macelium --version)
@@ -219,7 +219,7 @@ install_macelium() {
   }
 
   # Installs Homebrew and macelium, each unless it already is, and upgrades
-  # a macelium that is to the latest.
+  # a macelium already installed to the latest.
   install_tools() {
     if command -v brew >/dev/null; then
       echo "==> Homebrew: already installed"
