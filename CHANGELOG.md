@@ -14,11 +14,13 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
-## Unreleased
+## 0.9.0
 
 - `install.sh` upgrades a macelium already installed to the latest before
   it bootstraps, and says whether it upgraded and to which version.
 - `bootstrap`'s banner shows macelium's version after its name.
+- `bootstrap`'s note that FileVault is off no longer has a blank line
+  between each of its lines.
 
 ## 0.8.0
 
