@@ -192,7 +192,10 @@ install_macelium() {
       return 1
     fi
     rm -f "$placeholder"
-    sudo -n xcode-select --switch /Library/Developer/CommandLineTools
+    sudo -n xcode-select --switch /Library/Developer/CommandLineTools || {
+      echo "install.sh: stopped: xcode-select --switch /Library/Developer/CommandLineTools failed" >&2
+      return 1
+    }
     echo "==> $label: installed"
   }
 
