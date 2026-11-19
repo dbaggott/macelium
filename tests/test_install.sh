@@ -12,10 +12,13 @@ run_installer() {
 }
 
 # A state repo that https://github.com/example/state clones, and so do
-# https://git.example.org/me/state and its SSH forms; a brew whose
-# `list` fails until `install` has run; a gh that records its call and fails,
-# so a test never signs in; and a macelium that records its call and whether
-# stdin is a terminal, and exits $STUB_MACELIUM_STATUS.
+# https://git.example.org/me/state and its SSH forms; a brew whose `list`
+# fails until `install` has run, with `--versions` naming macelium 1.0.0 until
+# an upgrade, and whose `upgrade` fails when $STUB_BREW_UPGRADE_FAILS is set
+# and otherwise moves macelium to $STUB_MACELIUM_LATEST when that is set; a gh
+# that records its call and fails, so a test never signs in; and a macelium
+# that records its call and whether stdin is a terminal, and exits
+# $STUB_MACELIUM_STATUS.
 installable_state() {
   make_state macelium.conf $'contract 1\n'
   local form
@@ -35,7 +38,17 @@ STUB
 echo "brew $*" >>"$STUB_LOG"
 case $1 in
   install) touch "$STUB_LOG.installed" ;;
-  list) [[ -e $STUB_LOG.installed ]] ;;
+  list)
+    [[ -e $STUB_LOG.installed ]] || exit 1
+    [[ $2 != --versions ]] || echo "macelium $(cat "$STUB_LOG.version" 2>/dev/null || echo 1.0.0)"
+    ;;
+  upgrade)
+    if [[ -n ${STUB_BREW_UPGRADE_FAILS:-} ]]; then
+      echo "Error: the upgrade failed" >&2
+      exit 1
+    fi
+    [[ -z ${STUB_MACELIUM_LATEST:-} ]] || echo "$STUB_MACELIUM_LATEST" >"$STUB_LOG.version"
+    ;;
 esac
 STUB
   cat >"$sandbox/bin/gh" <<'STUB'
@@ -96,10 +109,32 @@ test_install_installs_clones_and_bootstraps_then_resumes() {
   run_tty -- bash "$installer" example/state
   assert_status 0
   assert_contains "$out" "==> Homebrew: already installed"
-  assert_contains "$out" "==> macelium: already installed"
+  assert_contains "$out" "==> macelium: already installed, the latest version (1.0.0)"
   assert_contains "$out" "==> Clone: $HOME/git/state is already a clone of example/state"
   assert_not_contains "$STUB_LOG" "brew install"
   assert_contains "$STUB_LOG" "macelium bootstrap $HOME/git/state tty=yes"
+}
+
+test_install_upgrades_an_installed_macelium_before_the_bootstrap() {
+  installable_state
+  touch "$STUB_LOG.installed"
+  export STUB_MACELIUM_LATEST=1.1.0
+  run_tty -- bash "$installer" example/state "$sandbox/clone"
+  assert_status 0
+  assert_contains "$out" "==> macelium: upgraded from 1.0.0 to 1.1.0"
+  assert_order "$STUB_LOG" "brew upgrade dbaggott/tap/macelium" "macelium bootstrap $sandbox/clone tty=yes"
+  assert_not_contains "$STUB_LOG" "brew install"
+}
+
+test_install_stops_when_the_macelium_upgrade_fails() {
+  installable_state
+  touch "$STUB_LOG.installed"
+  export STUB_BREW_UPGRADE_FAILS=1
+  run_tty -- bash "$installer" example/state "$sandbox/clone"
+  assert_status 1
+  assert_contains "$out" "Error: the upgrade failed"
+  assert_contains "$out" "install.sh: stopped: brew upgrade dbaggott/tap/macelium failed"
+  assert_not_contains "$STUB_LOG" "macelium bootstrap"
 }
 
 test_install_takes_a_path_and_a_dot_git_name_and_exits_with_the_bootstrap_status() {

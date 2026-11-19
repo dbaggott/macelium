@@ -71,6 +71,15 @@ test_banner_without_color_under_no_color() {
   if grep -qE $'\033\\[[0-9;]*m' "$out"; then fail "a color escape under NO_COLOR"; fi
 }
 
+test_banner_names_the_version_after_macelium() {
+  local version
+  version=$(grep -E '^VERSION=' "$tool" | head -n 1 | cut -d '"' -f 2)
+  # shellcheck disable=SC2016 # expanded by the inner bash
+  run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner' _ "$tool"
+  assert_status 0
+  assert_contains "$out" "m a c e l i u m  $version"
+}
+
 test_banner_ends_on_a_blank_line() {
   # shellcheck disable=SC2016 # expanded by the inner bash
   run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner; echo after' _ "$tool"
@@ -421,6 +430,8 @@ test_bootstrap_warns_when_filevault_is_off_and_goes_on() {
   export STUB_FDESETUP_STATUS='FileVault is Off.'
   run_tty -- "$tool" bootstrap "$state"
   assert_order "$out" "FYI: Your macOS FileVault is off." "Macelium will now configure your computer" "==> chezmoi init" "Steps:"
+  grep -A2 -F "FYI: Your macOS FileVault is off." "$out" | tail -n 2 | head -n 1 | grep -q '^best practice' ||
+    fail "the FileVault note's lines are not consecutive"
   sed -n '/^Steps:/,$p' "$out" | grep -qF "FileVault is off: enable it through System Settings -> Privacy & Security -> FileVault" ||
     fail "no FileVault warning at the end"
   assert_contains "$out" "Bootstrap complete, with 1 warning."
