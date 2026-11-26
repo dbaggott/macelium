@@ -7,6 +7,7 @@ _macelium() {
   local curcontext=$curcontext state line ret=1
   local -a commands
   commands=(
+    'setup:find or create the state repo, and set this Mac up from it'
     'init:capture this Mac into a new state repo'
     'bootstrap:set up this Mac from a state repo'
     'plan:show how this Mac differs from the state repo'
@@ -28,6 +29,12 @@ _macelium() {
     argument)
       curcontext=${curcontext%:*:*}:macelium-$words[1]:
       case $words[1] in
+        setup)
+          _arguments \
+            '(- *)'{-h,--help}'[show the help]' \
+            ':state repo (<owner>/<repo> or git URL):' \
+            ':state repo path:_directories' && ret=0
+          ;;
         init)
           _arguments \
             '--public[say, when offering each file, that the repo will be public]' \

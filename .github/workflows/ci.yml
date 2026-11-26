@@ -85,6 +85,14 @@ jobs:
           echo "plan exited $status"
           [[ $status != 1 ]]
 
+      # install.sh installs the tap's macelium, then hands over to the
+      # macelium on PATH, so this branch's goes first, for its setup to run.
+      - name: Put this branch's macelium first on PATH
+        run: |
+          mkdir -p "$RUNNER_TEMP/branch-bin"
+          ln -s "$GITHUB_WORKSPACE/macelium" "$RUNNER_TEMP/branch-bin/macelium"
+          echo "$RUNNER_TEMP/branch-bin" >>"$GITHUB_PATH"
+
       # install.sh as a new Mac runs it, after the step above has bootstrapped
       # a clean runner with this branch's macelium. The Brewfile installed the
       # published macelium there, so it is removed first, for the installer to
@@ -181,6 +189,7 @@ jobs:
                 -re {\nEmail( \[[^]]*\])?: } { send "ci@example.com\r"; exp_continue }
                 -re {Capture ~/[^\r\n]*\? \[Y/n\] } { send "y\r"; exp_continue }
                 -ex {out of the state repo? [Y/n] } { send "y\r"; exp_continue }
+                -re {Push [^\r\n]* now\? \(You can inspect the files in another terminal first\) \[(Y/n|y/N)\] } { send "y\r"; exp_continue }
                 -re {[^\r\n]+(?=[\r\n])} { exp_continue }
                 timeout { puts "\nexpect: no output for 300s, so a prompt it does not know is waiting"; exit 1 }
                 eof
@@ -224,8 +233,8 @@ jobs:
             exit 1
           fi
 
-          # A1: an empty repo, so install.sh takes the create flow: init
-          # captures the runner, the push, then the bootstrap. Afterwards
+          # A1: an empty repo, so setup takes the create flow: init captures
+          # the runner, gitleaks scans it, the commit and the push, then the bootstrap. Afterwards
           # plan finds nothing to list in the Homebrew or files sections.
           # Upgrades available are left out: they follow Homebrew's
           # releases, not what init captured. Its runs skip brew bundle's
@@ -238,7 +247,8 @@ jobs:
 
           a1="$RUNNER_TEMP/a1.log"
           HOMEBREW_BUNDLE_NO_UPGRADE=1 run_guided "$url" | tee "$a1"
-          assert_lines "$a1" "macelium init $HOME/Developer/state" "Pushing $HOME/Developer/state to $url" \
+          assert_lines "$a1" "macelium init $HOME/Developer/state" "Scanning $HOME/Developer/state for secrets (gitleaks)" \
+            "Committing $HOME/Developer/state" "Pushing $HOME/Developer/state to $url" \
             "macelium bootstrap $HOME/Developer/state"
           [[ -n $(git -C "$remote" for-each-ref) ]] || {
             echo "A1: nothing was pushed"

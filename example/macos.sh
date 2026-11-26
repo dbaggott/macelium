@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# The example's settings list (README.md, "The settings list"). It writes
+# The example's settings list. It writes
 # only to a domain of its own, so running it changes nothing that matters.
 setting com.example.macelium-example greeting string hello
 setting com.example.macelium-example colors array red green

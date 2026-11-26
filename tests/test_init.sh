@@ -42,7 +42,7 @@ test_init_writes_the_layout_and_one_commit() {
   [[ $(cat "$repo/macelium.conf") == *$'\ncontract 1' ]] || fail "macelium.conf: $(cat "$repo/macelium.conf")"
   [[ $(cat "$repo/.chezmoiroot") == home ]] || fail ".chezmoiroot: $(cat "$repo/.chezmoiroot")"
   ! grep -qv '^#' "$repo/macos.sh" || fail "macos.sh holds more than comments"
-  assert_contains "$repo/macos.sh" "https://github.com/dbaggott/macelium#the-settings-list"
+  assert_contains "$repo/macos.sh" "https://github.com/dbaggott/macelium#configuration-reference"
   assert_contains "$repo/home/.chezmoi.toml.tmpl" 'sourceDir = {{ .chezmoi.workingTree | quote }}'
   assert_contains "$repo/home/.chezmoidata.toml" 'name = "Git Name"'
   assert_contains "$repo/home/.chezmoidata.toml" 'email = "git@example.com"'

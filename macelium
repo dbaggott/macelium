@@ -2,7 +2,7 @@
 # Compares this machine with a state repo, and brings it in line, in the shape
 # of terraform's plan and apply. The state repo is a chezmoi source with
 # macelium.conf at its root, naming its Brewfile, settings list and apps
-# directory (README.md, "The state repo").
+# directory.
 #
 # `macelium --help` gives each command's usage.
 #
@@ -25,6 +25,10 @@
 # listed or uninstalled by hand. When the plan lists macelium itself to
 # upgrade, apply upgrades it before any other step and hands over to the new
 # version's apply, which plans and asks again.
+#
+# setup finds the state repo and bootstraps a clone of it, or captures this
+# Mac into a new one with init, scans that with gitleaks, and pushes it on a
+# yes before the bootstrap. install.sh installs macelium and hands over to it.
 #
 # bootstrap sets up a machine from a checkout, the one named or else the one
 # chezmoi's config names, before anything is applied or again at any point
@@ -60,10 +64,9 @@
 # it watches, changed since the hooks last ran.
 set -uo pipefail
 
-# A merge to main that changes this line is a release (README.md, "Releasing").
-VERSION="0.9.0"
-# How brew bundle check names macelium in a state repo's Brewfile, whose line
-# for it README.md ("The Brewfile's macelium line") gives.
+# A merge to main that changes this line is a release (.github/workflows/release.yml).
+VERSION="0.10.0"
+# How brew bundle check names macelium in a state repo's Brewfile.
 self_formula=dbaggott/tap/macelium
 
 # brew bundle runs brew update first unless this is set, which in apply would
@@ -74,7 +77,7 @@ local_brewfile="$HOME/.config/macelium/Brewfile.local"
 # The dotfiles command's per-machine Brewfile, which macelium does not read:
 # plan warns while it exists.
 state_dir="$HOME/.local/state/macelium"
-# The manifest contract this macelium reads (README.md, "Contract").
+# The manifest contract this macelium reads.
 known_contract=1
 # The agent's run on wake can start before the network is back, so --notify
 # retries the fetch; a plan or apply run by hand fetches once.
@@ -1551,11 +1554,12 @@ plan() {
 # Takes the question and the answer an empty reply gives, yes or no. Asks on
 # the terminal, since chezmoi apply runs some prompts with stdin elsewhere.
 # Only y or yes, in any case, says yes; any other reply, or none, says no.
+# End-of-file says no too, with status 2, for a caller that stops on it.
 confirm() {
   local hint='[y/N]' answer=''
   [[ $2 == yes ]] && hint='[Y/n]'
   printf '%s %s ' "$1" "$hint" >/dev/tty
-  read -r answer </dev/tty || return 1
+  read -r answer </dev/tty || return 2
   case $answer in
     '') [[ $2 == yes ]] ;;
     [yY] | [yY][eE][sS]) return 0 ;;
@@ -1605,7 +1609,7 @@ apply() {
   esac
   require_terminal || return 1
   if [[ -n ${MACELIUM_UPGRADED_FROM:-} ]]; then
-    printf 'macelium was upgraded from %s to %s, and plans again.\n\n' "$MACELIUM_UPGRADED_FROM" "$VERSION"
+    printf '\nmacelium was upgraded from %s to %s, and plans again.\n\n' "$MACELIUM_UPGRADED_FROM" "$VERSION"
   fi
   find_checkout
   if [[ $manifest_failed == yes ]]; then
@@ -2579,10 +2583,10 @@ bootstrap() {
 # --- init -------------------------------------------------------------------
 
 # The line a captured ~/.zshrc ends with, and the section a captured
-# ~/.gitconfig ends with, so that each machine's own differences load last
-# (README.md, "Person values and machine differences").
+# ~/.gitconfig ends with, so that each machine's own differences load last.
 zshrc_local_line='[[ -r ~/.zshrc.local ]] && source ~/.zshrc.local'
 gitconfig_local_section=$'[include]\n\tpath = ~/.gitconfig.local'
+capture_name='' capture_email=''
 
 # Takes the question and its default, which may be empty. Asks on the
 # terminal, again while the reply and the default are both empty, and prints
@@ -2609,8 +2613,8 @@ ask_value() {
 }
 
 # Prints this Mac's formulae, casks and taps as a Brewfile, with macelium's
-# line as README.md ("The Brewfile's macelium line") gives it, in place of the
-# one brew bundle dump writes, or last when it writes none.
+# own line in place of the one brew bundle dump writes, or last when it
+# writes none.
 init_brewfile() {
   local dump line found=no
   local own="brew \"$self_formula\", trusted: true, restart_service: :always"
@@ -2726,7 +2730,7 @@ append_local() {
 }
 
 # Takes [--public] and the path. Captures this Mac into a new state repo at
-# the path, a git repo with one commit and no remote (README.md, "Commands").
+# the path, then says what to do next.
 init_command() {
   local public=no path=''
   while (($#)); do
@@ -2742,6 +2746,32 @@ init_command() {
     shift
   done
   [[ -n $path ]] || usage_error "missing <path>"
+  capture_mac "$public" "$path" || return 1
+  if ! commit_capture "$path" "$capture_name" "$capture_email"; then
+    print_error "committing $path failed: remove it and run macelium init again"
+    return 1
+  fi
+  printf '\nState repo: %s, with one commit and no remote.\n' "$path"
+  echo "Next, push it to a new repo, then run macelium bootstrap $path."
+}
+
+# Takes the path of a repo capture_mac wrote, and the name and email to
+# author its commit. Commits everything in it, amending the commit there is
+# when there is one, so a repo not yet pushed always has one commit.
+commit_capture() {
+  local amend=()
+  git -C "$1" rev-parse -q --verify HEAD >/dev/null && amend=(--amend)
+  git -C "$1" add -A &&
+    git -C "$1" -c user.name="$2" -c user.email="$3" -c commit.gpgsign=false \
+      commit -q --no-verify ${amend[@]+"${amend[@]}"} -m 'Capture this Mac with macelium init'
+}
+
+# Takes whether the repo will be public, yes or no, and the path. Captures
+# this Mac into a new state repo at the path, a git repo with nothing
+# committed and no remote, and sets capture_name and capture_email to the
+# name and email it asked for.
+capture_mac() {
+  local public=$1 path=$2
   refuse_foreign_chezmoi || return 1
   if [[ -e $path && ! -d $path ]] || [[ -d $path && -n $(ls -A "$path") ]]; then
     print_error "$path exists and is not empty: name a new or empty directory"
@@ -2792,11 +2822,11 @@ init_command() {
   # shellcheck disable=SC2016 # the template's, not the shell's
   if ! {
     mkdir -p "$home" &&
-      printf '%s\n' '# The manifest: https://github.com/dbaggott/macelium#the-manifest' "contract $known_contract" >"$path/macelium.conf" &&
+      printf '%s\n' '# The manifest: https://github.com/dbaggott/macelium#configuration-reference' "contract $known_contract" >"$path/macelium.conf" &&
       printf 'home\n' >"$path/.chezmoiroot" &&
       printf '%s\n' "$brewfile" >"$path/Brewfile" &&
       printf '%s\n' '# The macOS settings every machine has, a declaration a line:' \
-        '# https://github.com/dbaggott/macelium#the-settings-list' >"$path/macos.sh" &&
+        '# https://github.com/dbaggott/macelium#configuration-reference' >"$path/macos.sh" &&
       printf '%s\n' '{{- /* macelium finds the state repo through chezmoi source-path, so the' \
         '       config names this checkout as chezmoi'\''s source. */ -}}' \
         'sourceDir = {{ .chezmoi.workingTree | quote }}' >"$home/.chezmoi.toml.tmpl" &&
@@ -2807,10 +2837,7 @@ init_command() {
       { [[ -z $gitconfig ]] || printf '%s\n' "$gitconfig" >"$home/dot_gitconfig.tmpl"; } &&
       { [[ -z $zshrc ]] || printf '%s\n' "$zshrc" >"$home/dot_zshrc"; } &&
       { [[ -z $mise ]] || { mkdir -p "$home/dot_config/mise" && printf '%s\n' "$mise" >"$home/dot_config/mise/config.toml"; }; } &&
-      git init -q -b main "$path" &&
-      git -C "$path" add -A &&
-      git -C "$path" -c user.name="$name" -c user.email="$email" -c commit.gpgsign=false \
-        commit -q --no-verify -m 'Capture this Mac with macelium init'
+      git init -q -b main "$path"
   }; then
     print_error "writing $path failed: remove it and run macelium init again"
     return 1
@@ -2820,10 +2847,704 @@ init_command() {
     return 1
   fi
 
-  printf '\nState repo: %s, with one commit and no remote.\n' "$path"
+  capture_name=$name capture_email=$email
   [[ -z $gitconfig_moved ]] || echo "Moved lines that look like secrets to ~/.gitconfig.local."
   [[ -z $zshrc_moved ]] || echo "Moved lines that look like secrets to ~/.zshrc.local."
-  echo "Next, push it to a new repo, then run macelium bootstrap $path."
+}
+
+# --- setup ------------------------------------------------------------------
+#
+# setup finds the state repo and sets this Mac up from it, or, when there is
+# none, captures this Mac into a new one, scans it for secrets and pushes it
+# once the operator says to, then sets this Mac up from it. Each step is
+# skipped when what it leaves is already there, so running it again goes on
+# from where it stopped. Its functions share the state setup_command declares.
+#
+# Its prompts read the terminal, and fail at end-of-file, even after a partly
+# typed reply, so a run whose terminal has gone away stops at a question and
+# takes no at an offer, rather than guess.
+
+sign_in_needs='needs a personal access token or a registered SSH key, since account passwords are refused over HTTPS; git asks for what it needs'
+# The exit status gitleaks is told to give when it finds a secret, apart from
+# the 1 it gives when it fails.
+gitleaks_found_status=3
+
+lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+# Takes a git URL: https://, ssh:// or scp form, [user@]host:path. Sets
+# url_host, and url_path without its leading /, trailing / or .git, and
+# fails for anything else. A user name or a port is no part of either.
+parse_git_url() {
+  local re_url='^(https|ssh)://([^/@]+@)?([^/@:]+)(:[0-9]+)?/(.*)$'
+  local re_scp='^([^/@:]+@)?([^/@:]+):(.*)$'
+  if [[ $1 =~ $re_url ]]; then
+    url_host=${BASH_REMATCH[3]} url_path=${BASH_REMATCH[5]}
+  elif [[ $1 != *://* && $1 =~ $re_scp ]]; then
+    url_host=${BASH_REMATCH[2]} url_path=${BASH_REMATCH[3]}
+  else
+    return 1
+  fi
+  url_path=${url_path#/}
+  url_path=${url_path%/}
+  url_path=${url_path%.git}
+  [[ -n $url_path && $url_path != *[[:space:]]* ]]
+}
+
+# Takes <owner>/<repo>, meaning GitHub, or a git URL, and sets the state
+# repo's fields from it: its host, whether that is GitHub, its path there,
+# which GitHub's names compare in any case, the URL to clone, and how to name
+# it. Fails for anything else.
+set_repo() {
+  if [[ $1 =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]; then
+    host=github.com repo_path=${1%.git} url=https://github.com/${1%.git}
+  elif parse_git_url "$1"; then
+    host=$url_host repo_path=$url_path url=$1
+  else
+    return 1
+  fi
+  github=no name=$url
+  if [[ $(lower "$host") == github.com ]]; then
+    github=yes name=$repo_path
+    [[ $repo_path =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]]
+  fi
+}
+
+# Takes a git remote URL, and succeeds when it names the state repo: on
+# GitHub, in any case; elsewhere, the same host and path exactly.
+names_state_repo() {
+  parse_git_url "$1" || return 1
+  if [[ $github == yes ]]; then
+    [[ $(lower "$url_host") == github.com && $(lower "$url_path") == "$(lower "$repo_path")" ]]
+  else
+    [[ $url_host == "$host" && $url_path == "$repo_path" ]]
+  fi
+}
+
+# Prints where the state repo goes when no path is given: in the first of
+# the directories people keep code in that this Mac has, else the home
+# directory.
+default_path() {
+  local dir
+  for dir in Developer git src code Projects; do
+    if [[ -d $HOME/$dir ]]; then
+      printf '%s\n' "$HOME/$dir/${repo_path##*/}"
+      return
+    fi
+  done
+  printf '%s\n' "$HOME/${repo_path##*/}"
+}
+
+# Sets path_state to what the path holds: empty, when it is missing or an
+# empty directory; named, a repo whose remote names the state repo;
+# unpushed, a repo with macelium.conf and no remote, as init leaves it; else
+# other. A repo counts only at its top level.
+read_path_state() {
+  local remote
+  path_state=other
+  if [[ ! -e $path ]] || [[ -d $path && -z $(ls -A "$path") ]]; then
+    path_state=empty
+  elif [[ -d $path && $(git -C "$path" rev-parse --show-toplevel 2>/dev/null) == "$(cd "$path" && pwd -P)" ]]; then
+    remote=$(git -C "$path" config --get remote.origin.url)
+    if [[ -n $remote ]]; then
+      if names_state_repo "$remote"; then path_state=named; fi
+    elif [[ -f $path/macelium.conf ]]; then
+      path_state=unpushed
+    fi
+  fi
+}
+
+# Takes a question and its default, which may be empty. Sets answer to the
+# reply, or to the default when the reply is empty. At end-of-file, says
+# the run stopped. Unlike ask_value, it never takes the default at
+# end-of-file, and an empty default allows an empty reply.
+ask() {
+  local hint=''
+  [[ -n $2 ]] && hint=" [$2]"
+  printf '%s%s: ' "$1" "$hint" >/dev/tty
+  if ! read -r answer </dev/tty; then
+    printf '\n' >/dev/tty
+    print_stopped "no answer"
+    return 1
+  fi
+  [[ -n $answer ]] || answer=$2
+}
+
+# Takes a question, the number of the default choice or nothing, and two
+# choices. Asks until the reply is 1 or 2, or empty with a default, and sets
+# choice to it.
+choose() {
+  printf '%s\n  1) %s\n  2) %s\n' "$1" "$3" "$4" >/dev/tty
+  while true; do
+    ask "Choose 1 or 2" "$2" || return 1
+    if [[ $answer == [12] ]]; then
+      choice=$answer
+      return 0
+    fi
+  done
+}
+
+# Takes a yes-or-no question and its default, yes or no, as confirm does.
+# Sets yes to the reply. At end-of-file, says the run stopped.
+ask_yes() {
+  confirm "$1" "$2"
+  case $? in
+    0) yes=yes ;;
+    1) yes=no ;;
+    *)
+      printf '\n' >/dev/tty
+      print_stopped "no answer"
+      return 1
+      ;;
+  esac
+}
+
+# Takes the question. Sets path to the answer to where the state repo goes,
+# default_path offered, with a leading ~ expanded and a relative path made
+# absolute. A directory to hold it that is missing is created on a yes, and
+# a no asks again.
+ask_path() {
+  local parent
+  while true; do
+    ask "$1" "$(default_path)" || return 1
+    path=$answer
+    # shellcheck disable=SC2088 # the reply's ~, not the shell's
+    if [[ $path == "~" || $path == "~/"* ]]; then path=$HOME${path#\~}; fi
+    [[ $path == /* ]] || path=$PWD/$path
+    parent=$(dirname "$path")
+    [[ ! -d $parent ]] || return 0
+    ask_yes "The path $parent does not exist, should I create it?" yes || return 1
+    [[ $yes == yes ]] || continue
+    mkdir -p "$parent" && return 0
+    print_error "could not create $parent"
+  done
+}
+
+# Prints the line saying how a host other than GitHub signs in, once a run.
+tell_sign_in() {
+  [[ $told_sign_in == no ]] || return 0
+  print_heading "$1 sign-in: $sign_in_needs"
+  told_sign_in=yes
+}
+
+# Sets login to the account gh is signed in to GitHub as, failing when it
+# is signed in to none.
+read_login() {
+  login=$(gh api user --jq .login 2>/dev/null) && [[ -n $login ]]
+}
+
+# Runs gh's browser sign-in to GitHub, which adds the account to any gh is
+# already signed in to and makes it the active one.
+gh_auth_login() {
+  gh auth login --hostname github.com --git-protocol https --web </dev/tty || {
+    print_error "gh auth login failed"
+    return 1
+  }
+}
+
+# Signs in to GitHub with gh, unless it is, has git use it, and says who it
+# is signed in as, once a run. Sets login.
+sign_in_to_github() {
+  [[ $signed_in == no ]] || return 0
+  if ! gh auth status --hostname github.com >/dev/null 2>&1; then
+    print_heading "Signing in to GitHub"
+    gh_auth_login || return 1
+  fi
+  gh auth setup-git --hostname github.com || {
+    print_error "gh auth setup-git failed"
+    return 1
+  }
+  if ! read_login; then
+    print_error "gh api user did not say who is signed in"
+    return 1
+  fi
+  print_heading "Signed in to GitHub as $login"
+  signed_in=yes
+}
+
+# Finds the state repo set_repo named, setting found to refs, empty (a repo
+# with no refs) or missing, and public to yes when git reads it without a
+# sign-in. On GitHub it reads anonymously, then, unless given anonymous,
+# signs in and asks gh; elsewhere it reads with git, and a repo git can't
+# read stops the run.
+find_repo() {
+  local refs view
+  found=missing public=no
+  if [[ $github == yes ]]; then
+    # No credential helper, so a gh signed in before this run can't make a
+    # private repo read as public. Once this run has signed in, gh decides.
+    if [[ $signed_in == no ]] &&
+      refs=$(GIT_TERMINAL_PROMPT=0 git -c credential.helper= ls-remote "https://github.com/$repo_path" 2>/dev/null); then
+      public=yes found=refs
+      [[ -n $refs ]] || found=empty
+      return 0
+    fi
+    [[ ${1:-} != anonymous ]] || return 0
+    sign_in_to_github || {
+      print_stopped "looking for $name needs a GitHub sign-in"
+      return 1
+    }
+    # Only gh's not-found error means there is no repo; any other, such as
+    # a network failure, stops rather than offer to create one.
+    if ! view=$(gh repo view "$repo_path" --json isEmpty,visibility --jq '"\(.isEmpty) \(.visibility)"' 2>&1); then
+      [[ $view == *"Could not resolve to a Repository"* ]] && return 0
+      printf '%s\n' "$view" >&2
+      print_stopped "gh repo view $repo_path failed"
+      return 1
+    fi
+    found=refs
+    [[ $view != true* ]] || found=empty
+    [[ $view != *PUBLIC ]] || public=yes
+    return 0
+  fi
+  tell_sign_in "$host"
+  if ! refs=$(git ls-remote "$url"); then
+    print_stopped "git can't read $url. $host sign-in: $sign_in_needs"
+    return 1
+  fi
+  found=refs
+  [[ -n $refs ]] || found=empty
+}
+
+# Takes whether to offer the GitHub sign-in after the bootstrap, and
+# whether the path already holds the clone. Clones the state repo to the
+# path, unless it does, and bootstraps it.
+clone_and_bootstrap() {
+  if [[ $2 == yes ]]; then
+    print_heading "Clone: $path is already a clone of $name"
+  else
+    print_heading "Cloning $name to $path"
+    if ! { mkdir -p "$(dirname "$path")" && git clone "$url" "$path"; }; then
+      print_stopped "git clone $url failed"
+      return 1
+    fi
+  fi
+
+  print_heading "macelium bootstrap $path"
+  bootstrap "$path" || return
+
+  # The repo read without a sign-in, so pushing to it still needs one. The
+  # Mac is set up by now, so end-of-file is a no, and a failed sign-in is
+  # reported, not a failure.
+  if [[ $1 == yes ]] && ! gh auth status --hostname github.com >/dev/null 2>&1; then
+    if confirm "Sign in to GitHub with gh, so you can push changes from this machine?" yes; then
+      sign_in_to_github || print_heading "GitHub sign-in: failed; run gh auth login and gh auth setup-git to push from this machine"
+    else
+      print_heading "GitHub sign-in: skipped; run gh auth login and gh auth setup-git to push from this machine"
+    fi
+  fi
+}
+
+# The guided form's clone: offers the clone at the default path when there
+# is one, unless given ask, else asks the path, then clones and bootstraps,
+# offering the sign-in after when GitHub read the repo without one.
+clone_asked_path() {
+  if [[ ${1:-} != ask ]]; then
+    path=$(default_path)
+    read_path_state
+    if [[ $path_state == named ]]; then
+      ask_yes "It is already cloned at $path. Set up this Mac from that clone?" yes || return 1
+      if [[ $yes == yes ]]; then
+        clone_and_bootstrap "$public" yes
+        return
+      fi
+    fi
+  fi
+  ask_path "Where do you want to clone the state repo?" || return 1
+  read_path_state
+  case $path_state in
+    empty) clone_and_bootstrap "$public" no ;;
+    named) clone_and_bootstrap "$public" yes ;;
+    *)
+      print_error "$path holds something other than a clone of $name: run macelium setup again and answer another path"
+      return 1
+      ;;
+  esac
+}
+
+# Runs gitleaks over the files at the path, setting gitleaks_output to what
+# it printed, and returns its exit status.
+run_gitleaks() {
+  gitleaks_output=$(gitleaks dir "$path" --no-banner --redact --verbose --log-level warn \
+    --exit-code "$gitleaks_found_status" 2>&1)
+}
+
+# Scans the files at the path, which are what the commit before the push
+# takes, for secrets with gitleaks, and says what it found, showing any
+# secret redacted. Sets secrets_found to yes when it found one, and fails
+# when gitleaks fails.
+scan_for_secrets() {
+  local status gitleaks_output=''
+  secrets_found=no
+  print_heading "Scanning $path for secrets (gitleaks)"
+  with_spinner "Scanning $path for secrets" run_gitleaks
+  status=$?
+  case $status in
+    0) echo "No secrets detected in $path." ;;
+    "$gitleaks_found_status")
+      secrets_found=yes
+      printf '%s\n\n' "$gitleaks_output"
+      echo "Warning: gitleaks found what look like secrets in $path, shown above redacted. Pushing sends them to $name, and from there to every Mac set up from it. Remove each from its file, or move it to ~/.zshrc.local or ~/.gitconfig.local, which stay on this Mac. Nothing is committed until you say to push." >&2
+      ;;
+    *)
+      printf '%s\n' "$gitleaks_output" >&2
+      print_stopped "gitleaks failed scanning $path, so nothing was pushed"
+      return 1
+      ;;
+  esac
+}
+
+# Shows the path, and asks whether to push it, no by default when the scan
+# found secrets. Sets yes to the reply. On a no, says how to go on.
+review_before_push() {
+  local default=yes
+  [[ $secrets_found == no ]] || default=no
+  printf '\nThe new state repo is at %s.\n' "$path"
+  ask_yes "Push $path to $name now? (You can inspect the files in another terminal first)" "$default" || return 1
+  [[ $yes == no ]] || return 0
+  printf '%s\n' "Nothing was committed or pushed. Change the files in $path as you need to." \
+    "Run macelium setup again (or install.sh) to go on: it finds $path already captured, and scans it and asks again before it commits and pushes."
+}
+
+# Sets capture_name and capture_email to the name and email the state repo
+# at the path gives every machine, in its chezmoi data, which author its
+# commit. Asks for either it lacks.
+read_capture_author() {
+  local data
+  # A config file that does not exist keeps this Mac's chezmoi config out.
+  data=$(chezmoi data --source "$path" --config "$path/.git/no-chezmoi-config.toml" --format json 2>/dev/null)
+  capture_name=$(jq -r '.name // empty' <<<"$data" 2>/dev/null)
+  capture_email=$(jq -r '.email // empty' <<<"$data" 2>/dev/null)
+  if [[ -z $capture_name || -z $capture_email ]]; then
+    echo "The state repo's chezmoi data names no author for its commit."
+  fi
+  while [[ -z $capture_name ]]; do
+    ask Name "$(git config --global --includes user.name)" || return 1
+    capture_name=$answer
+  done
+  while [[ -z $capture_email ]]; do
+    ask Email "$(git config --global --includes user.email)" || return 1
+    capture_email=$answer
+  done
+}
+
+# Commits what the path holds, which the scan and the review saw.
+commit_state_repo() {
+  print_heading "Committing $path"
+  if ! read_capture_author || ! commit_capture "$path" "$capture_name" "$capture_email"; then
+    print_stopped "committing $path failed, so nothing was pushed"
+    return 1
+  fi
+}
+
+# Pushes the state repo's branch to its remote, setting its upstream.
+push_state_repo() {
+  print_heading "Pushing $path to $name"
+  git -C "$path" push -u origin HEAD || {
+    print_stopped "git push to $name failed"
+    return 1
+  }
+}
+
+# Takes --private or --public. Creates the state repo on GitHub from the
+# path, pushing it.
+gh_repo_create() {
+  print_heading "gh repo create $repo_path $1 --source $path --push"
+  gh repo create "$repo_path" "$1" --source "$path" --push
+}
+
+# Creates the state repo on GitHub from the path and pushes it. A private
+# repo GitHub refuses is offered as a public one, no by default.
+create_on_github() {
+  local visibility=--private
+  [[ $public == no ]] || visibility=--public
+  gh_repo_create "$visibility" && return 0
+  if gh repo view "$repo_path" >/dev/null 2>&1; then
+    print_stopped "gh created $repo_path but did not push to it; run macelium setup again to push"
+    return 1
+  fi
+  if [[ $visibility == --private ]]; then
+    if confirm "GitHub did not create a private repo, for the reason above. Create a public one, which anyone can read, everything captured in it included?" no; then
+      gh_repo_create --public && return 0
+    fi
+  fi
+  print_stopped "gh repo create $repo_path failed"
+  return 1
+}
+
+# Takes new, for a GitHub repo to create, or existing, for a repo with no
+# refs. Asks the path, captures this Mac there with init, scans it for
+# secrets, pushes it once the operator says to, and bootstraps it, each step
+# skipped when the path shows it done.
+create_state_repo() {
+  if [[ $github == yes ]] && ! sign_in_to_github; then
+    print_stopped "pushing to $name needs a GitHub sign-in"
+    return 1
+  fi
+  ask_path "Where do you want to keep the new state repo?" || return 1
+  read_path_state
+  # A clone of the empty repo has nothing to push, and init refuses it.
+  if [[ $path_state == named ]] && ! git -C "$path" rev-parse -q --verify HEAD >/dev/null; then
+    path_state=other
+  fi
+  if [[ $path_state == other ]]; then
+    print_error "$path holds something other than a new state repo for $name: run macelium setup again and answer another path"
+    return 1
+  fi
+  if [[ $1 == new && $path_state == named ]]; then
+    print_stopped "$path's remote names $name, which GitHub does not have: run git -C $path remote remove origin, then macelium setup again, to create it"
+    return 1
+  fi
+  if [[ $1 == new ]]; then
+    choose "Who can read the new repo?" 1 "only you (private)" "anyone (public), including everything init captures" || return 1
+    public=no
+    [[ $choice == 1 ]] || public=yes
+  fi
+
+  if [[ $path_state == empty ]]; then
+    printf '%s\n' '' \
+      "Macelium will now record your computer's current setup, this includes: your" \
+      "Homebrew applications and, if you choose, your git, shell and mise settings." \
+      "You'll be asked a few questions about what to include. Nothing is installed or" \
+      "changed on your computer during this step."
+    local flag=''
+    [[ $public == no ]] || flag='--public '
+    print_heading "macelium init $flag$path"
+    capture_mac "$public" "$path" || {
+      print_stopped "macelium init failed"
+      return 1
+    }
+  else
+    print_heading "macelium init: $path already holds the new state repo"
+  fi
+
+  scan_for_secrets || return 1
+  review_before_push || return 1
+  [[ $yes == yes ]] || return 0
+  commit_state_repo || return 1
+
+  if [[ $1 == new ]]; then
+    create_on_github || return 1
+  else
+    if [[ $path_state != named ]] && ! git -C "$path" remote add origin "$url"; then
+      print_stopped "git remote add origin $url failed"
+      return 1
+    fi
+    push_state_repo || return 1
+  fi
+
+  print_heading "macelium bootstrap $path"
+  bootstrap "$path"
+}
+
+# Takes new, the step for a state repo find_repo found missing: create, or
+# stop, or ask, for clone_asked_path. Goes on from what find_repo found.
+go_on_from_found() {
+  case $found in
+    refs) clone_asked_path "${1:-}" ;;
+    empty) create_state_repo existing ;;
+    *)
+      if [[ ${1:-} == new ]]; then
+        create_state_repo new
+      else
+        print_stopped "found no repo $name to read"
+        return 1
+      fi
+      ;;
+  esac
+}
+
+# Takes the question and what to say of a reply that names no repo, or
+# neither, for the question that takes either form. Asks for the state repo
+# until a reply names one, then finds it and goes on from what it found.
+ask_repo() {
+  local question=${1:-"Your state repo, as <owner>/<repo> on GitHub or a git URL"}
+  while true; do
+    ask "$question" "" || return 1
+    set_repo "$answer" && break
+    print_error "${2:-that is neither <owner>/<repo> nor a git URL}"
+  done
+  find_repo || return 1
+  go_on_from_found
+}
+
+# With no argument: asks where the state repo is, finds it, and clones it,
+# or creates it when there is none.
+guided_setup() {
+  printf '\n\nWelcome to Macelium!  You will now be guided through the setup.\n\n' >/dev/tty
+  choose "What source control provider do you use?" 1 "GitHub" "another git provider" || return 1
+  if [[ $choice == 2 ]]; then
+    tell_sign_in "Git host"
+    ask_repo "The state repo's git URL" "that is not a git URL"
+    return
+  fi
+
+  if gh auth status --hostname github.com >/dev/null 2>&1 && read_login; then
+    confirm_signed_in || return 1
+  else
+    ask_username || return
+    [[ $went_on == no ]] || return 0
+  fi
+
+  set_repo "$login/macelium-state"
+  find_repo || return 1
+  case $found in
+    refs) echo "Found $url." ;;
+    empty) echo "Found $url, with nothing in it yet." ;;
+    *)
+      choose "No macelium-state repo found for $login. Are you setting this up for the first time, or is your repo named something else?" '' \
+        "first time: capture this Mac into a new $login/macelium-state" "something else: give its name or URL" || return 1
+      if [[ $choice == 1 ]]; then go_on_from_found new; else ask_repo; fi
+      return
+      ;;
+  esac
+  go_on_from_found
+}
+
+# With gh signed in already: says as whom, and asks whether to go on as
+# that account or sign in to another, then signs in.
+confirm_signed_in() {
+  echo "gh is signed in to GitHub as $login."
+  choose "Continue as $login?" 1 "yes" "no, sign in to another account" || return 1
+  if [[ $choice == 2 ]]; then
+    print_heading "Signing in to GitHub"
+    gh_auth_login || return 1
+  fi
+  sign_in_to_github
+}
+
+# With gh signed out: asks the GitHub username. With none, has the user
+# create an account first; with one, looks for its macelium-state without
+# signing in, and on finding it, goes on from there, setting went_on.
+# Otherwise signs in, and when the account is not the one named, asks
+# whether to sign in as it or go on.
+ask_username() {
+  local user
+  while true; do
+    ask "GitHub username (empty if you do not have an account yet)" "" || return 1
+    user=$answer
+    [[ -z $user || $user =~ ^[A-Za-z0-9-]+$ ]] && break
+    print_error "that is not a GitHub username"
+  done
+  if [[ -z $user ]]; then
+    echo "You'll need a GitHub account. Opening https://github.com/signup in your browser."
+    open https://github.com/signup 2>/dev/null
+    ask "Create the account there, then come back and press Enter to sign in" "" || return 1
+  else
+    set_repo "$user/macelium-state"
+    find_repo anonymous
+    if [[ $found != missing ]]; then
+      went_on=yes
+      found_without_sign_in
+      return
+    fi
+    echo "No public $user/macelium-state found; signing in to look for a private one."
+  fi
+  sign_in_to_github || {
+    print_stopped "finding your state repo needs a GitHub sign-in"
+    return 1
+  }
+  [[ -n $user && $(lower "$login") != "$(lower "$user")" ]] || return 0
+  choose "gh is signed in as $login, not $user." 1 "sign in as $user" "continue as $login" || return 1
+  [[ $choice == 1 ]] || return 0
+  print_heading "Signing in to GitHub as $user"
+  echo "    ($login stays signed in too; gh auth switch moves between them)"
+  gh_auth_login || return 1
+  signed_in=no
+  sign_in_to_github || return 1
+  if [[ $(lower "$login") != "$(lower "$user")" ]]; then
+    print_stopped "signed in as $login, not $user"
+    return 1
+  fi
+}
+
+# The state repo find_repo found without a sign-in: confirms it, or offers
+# the clone of it at the default path, then goes on from it, or asks for
+# another repo.
+found_without_sign_in() {
+  local question="Set up this Mac from it?"
+  if [[ $found == refs ]]; then
+    echo "Found $url."
+    path=$(default_path)
+    read_path_state
+    if [[ $path_state == named ]]; then
+      clone_asked_path
+      return
+    fi
+  else
+    echo "Found $url, with nothing in it yet."
+    question="Capture this Mac into it?"
+  fi
+  ask_yes "$question" yes || return 1
+  if [[ $yes == yes ]]; then go_on_from_found ask; else ask_repo; fi
+}
+
+# Takes the state repo, as <owner>/<repo> on GitHub or a git URL, and the
+# path, or neither, for the guided form.
+setup_command() {
+  local args=()
+  while (($#)); do
+    case $1 in
+      -h | --help) help_and_exit ;;
+      -*) unexpected_argument "$1" ;;
+      *) args+=("$1") ;;
+    esac
+    shift
+  done
+  ((${#args[@]} <= 2)) || unexpected_argument "${args[2]}"
+
+  # The state every setup function shares: the state repo (set_repo), the
+  # path and what it holds, the GitHub sign-in, what find_repo found, and
+  # the prompts' replies.
+  local url_host url_path host github repo_path url name path path_state
+  local login signed_in=no told_sign_in=no went_on=no found public secrets_found
+  local answer choice yes
+  if ((${#args[@]} > 0)) && ! set_repo "${args[0]}"; then
+    usage_error "'${args[0]}' is neither <owner>/<repo> nor a git URL"
+  fi
+  require_terminal || return 1
+  # The formula depends on gitleaks. Only a new state repo is scanned, but
+  # setup checks first, so it never stops partway for want of it.
+  if ! command -v gitleaks >/dev/null; then
+    print_error "needs gitleaks to scan a new state repo for secrets: brew install gitleaks"
+    return 1
+  fi
+  refuse_foreign_chezmoi || return 1
+  if ((${#args[@]} == 0)); then
+    guided_setup
+    return
+  fi
+
+  path=${args[1]:-$(default_path)}
+  print_heading "Path: $path"
+  # The path is checked before the network, so a wrong one changes nothing.
+  # Empty, or missing, it is cloned to; a clone of the state repo is used as
+  # it is.
+  local cloned=no
+  read_path_state
+  case $path_state in
+    empty) ;;
+    named) cloned=yes ;;
+    *)
+      print_error "$path holds something other than a clone of $name: name another path, as the second argument"
+      return 1
+      ;;
+  esac
+
+  # A GitHub repo is probed over HTTPS, whatever form names it, since that
+  # is what an anonymous read and gh's sign-in both use.
+  local offer_sign_in=no
+  if [[ $github == no ]]; then
+    [[ $cloned == yes ]] || tell_sign_in "$host"
+  elif GIT_TERMINAL_PROMPT=0 git ls-remote "https://github.com/$repo_path" >/dev/null 2>&1; then
+    print_heading "GitHub sign-in: not needed, git can read $name"
+    offer_sign_in=yes
+  elif ! sign_in_to_github; then
+    print_stopped "git can't read $name without a GitHub sign-in"
+    return 1
+  fi
+  clone_and_bootstrap "$offer_sign_in" "$cloned"
 }
 
 # Takes a command, or nothing for macelium itself, and prints its synopsis,
@@ -2831,6 +3552,7 @@ init_command() {
 synopsis() {
   case ${1:-} in
     '') echo '<command> [<options>]' ;;
+    setup) echo 'setup [<owner>/<repo>|<git URL>] [<path>]' ;;
     init) echo 'init [--public] <path>' ;;
     bootstrap) echo 'bootstrap [<checkout>]' ;;
     plan) echo 'plan [--notify]' ;;
@@ -2850,6 +3572,7 @@ Keep this Mac in line with a state repo: a chezmoi source with macelium.conf
 at its root, listing its packages, runtimes, files and macOS settings.
 
 Commands:
+  setup      Find or create the state repo, and set this Mac up from it
   init       Capture this Mac into a new state repo
   bootstrap  Set up this Mac from a state repo
   plan       Show how this Mac differs from the state repo
@@ -2862,6 +3585,22 @@ Options:
   -V, --version  Print macelium's version
 
 Run `macelium <command> --help` for a command's options.
+EOF
+      ;;
+    setup)
+      cat <<'EOF'
+Set this Mac up from its state repo, cloning it to <path> and bootstrapping
+it. With no arguments it guides you: it finds the state repo on GitHub, as
+<you>/macelium-state, or on another git host, or, when there is none,
+captures this Mac into a new one with init, scans it for secrets with
+gitleaks, and pushes it once you say to. Running it again goes on from where
+it stopped. It needs a terminal.
+
+<path> defaults to the state repo's name in the first of ~/Developer, ~/git,
+~/src, ~/code and ~/Projects this Mac has, else in your home directory.
+
+Options:
+  -h, --help  Show this help
 EOF
       ;;
     init)
@@ -2976,13 +3715,14 @@ help_command() {
 [[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 
 case ${1:-} in
-  init | bootstrap | plan | apply | settings | help)
+  setup | init | bootstrap | plan | apply | settings | help)
     subcommand=$1
     shift
     ;;
 esac
 
 case $subcommand in
+  setup) setup_command "$@" ;;
   init) init_command "$@" ;;
   bootstrap) bootstrap "$@" ;;
   plan) plan "$@" ;;
