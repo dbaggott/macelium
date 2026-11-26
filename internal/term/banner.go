@@ -32,14 +32,11 @@ const (
 )
 
 type banner struct {
-	w            io.Writer
-	grid, kind   [bannerRows][]byte
-	drawn        bool
-	styles       map[byte]string
-	reset        string
-	sleep        func(time.Duration)
-	signature    string
-	signatureSet string
+	w          io.Writer
+	grid, kind [bannerRows][]byte
+	drawn      bool
+	styles     map[byte]string
+	reset      string
 }
 
 // Banner plays the banner on the terminal: a spore drifts down onto a
@@ -53,7 +50,7 @@ func Banner(w io.Writer, version string) {
 	if rows < bannerRows+3 || cols < bannerWidth {
 		return
 	}
-	b := &banner{w: w, sleep: time.Sleep, signature: bannerSignature, signatureSet: bannerSignature, styles: map[byte]string{}}
+	b := &banner{w: w, styles: map[byte]string{}}
 	if os.Getenv("NO_COLOR") == "" {
 		b.styles = map[byte]string{
 			'g': "\033[38;5;94m", 'h': "\033[38;5;180m", 't': "\033[1;38;5;230m", 's': "\033[38;5;223m",
@@ -119,7 +116,7 @@ func (b *banner) play() {
 	tipC := []int{c, c}
 	tipD := []int{-1, 1}
 	tipV := []int{random(2), random(2)}
-	letters := b.signature
+	letters := bannerSignature
 	letterAt := c + 3
 	for step := 0; step < 3*bannerWidth; step++ {
 		n := len(tipR)
@@ -182,7 +179,7 @@ func (b *banner) play() {
 				letters = letters[1:]
 				letterAt = nc + 2 + random(3)
 			}
-			if !strings.ContainsRune(b.signatureSet, rune(b.grid[nr][nc])) {
+			if !strings.ContainsRune(bannerSignature, rune(b.grid[nr][nc])) {
 				b.put(nr, nc, ch, 't')
 			}
 			tipR[i], tipC[i] = nr, nc
@@ -300,5 +297,5 @@ func (b *banner) frame(wait time.Duration) {
 	}
 	fmt.Fprint(b.w, out.String())
 	b.drawn = true
-	b.sleep(wait)
+	time.Sleep(wait)
 }
