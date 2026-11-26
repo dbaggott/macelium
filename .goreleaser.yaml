@@ -1,0 +1,38 @@
+version: 2
+
+# Builds the macOS binaries and publishes the GitHub Release, with
+# install.sh attached. The Homebrew formula is release.yml's: it carries a
+# service, which goreleaser's formulas are deprecated in favor of casks for,
+# and a cask cannot.
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: macelium
+    main: .
+    binary: macelium
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/dbaggott/macelium/internal/cli.Version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  extra_files:
+    - glob: ./install.sh
+
+changelog:
+  use: github
+  sort: asc

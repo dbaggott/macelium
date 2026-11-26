@@ -80,41 +80,43 @@ test_an_unknown_command_or_option_names_it_with_the_usage() {
   [[ ! -s $STUB_LOG ]] || fail "a usage error ran something: $(cat "$STUB_LOG")"
 }
 
-test_the_completions_offer_every_command_and_option_the_help_lists() {
-  local completions bash_commands command option
-  completions=$(dirname "$tool")/completions
-  bash_commands=$(sed -n "s/^ *local commands='\(.*\)'$/\1/p" "$completions/macelium.bash")
+# Takes the words after macelium, the last being the one to complete, and
+# prints what macelium's completion offers, a line each.
+offers() {
+  "$tool" __complete "$@" 2>/dev/null | grep -v '^:' | cut -f 1
+}
+
+# Takes the words as offers does, and prints the completion's directive to
+# the shell: :0 leaves the shell to complete a path.
+directive() {
+  "$tool" __complete "$@" 2>/dev/null | grep '^:'
+}
+
+test_the_completion_offers_every_command_and_option_the_help_lists() {
+  local command option
   for option in $(listed_options); do
-    grep -qF -- "$option" "$completions/_macelium" || fail "_macelium does not offer $option"
-    grep -qF -- "$option" "$completions/macelium.bash" || fail "macelium.bash does not offer $option"
+    offers "$option" | grep -qxF -- "$option" || fail "the completion does not offer $option"
   done
   for command in $(listed_commands); do
-    grep -qE "'$command:" "$completions/_macelium" || fail "_macelium does not offer $command"
-    [[ " $bash_commands " == *" $command "* ]] || fail "macelium.bash does not offer $command"
+    offers '' | grep -qxF "$command" || fail "the completion does not offer $command"
     for option in $(listed_options "$command"); do
-      grep -qF -- "$option" "$completions/_macelium" || fail "_macelium does not offer $command $option"
-      grep -qF -- "$option" "$completions/macelium.bash" || fail "macelium.bash does not offer $command $option"
+      offers "$command" "$option" | grep -qxF -- "$option" || fail "the completion does not offer $command $option"
     done
   done
-  zsh -n "$completions/_macelium" || fail "_macelium does not parse"
 }
 
-# Takes the words of a command line, the last being the one to complete, and
-# prints what the bash completion offers, a line each.
-bash_completes() {
-  # shellcheck disable=SC2016 # expanded by the inner bash
-  bash -c 'source "$1"; shift; COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _macelium; printf "%s\n" "${COMPREPLY[@]}"' \
-    _ "$(dirname "$tool")/completions/macelium.bash" "$@"
+test_the_completion_completes_commands_options_and_paths() {
+  [[ $(offers pl) == plan ]] || fail "macelium pl: $(offers pl)"
+  [[ $(offers plan --n) == --notify ]] || fail "plan --n: $(offers plan --n)"
+  [[ $(offers help sett) == settings ]] || fail "help sett: $(offers help sett)"
+  local words
+  for words in 'init a-' 'bootstrap a-' 'setup me/state a-' 'settings --file a-f'; do
+    # shellcheck disable=SC2086 # each case is its words
+    [[ -z $(offers $words) && $(directive $words) == :0 ]] || fail "$words: not left to the shell's path completion"
+  done
 }
 
-test_the_bash_completion_completes_commands_options_and_paths() {
-  [[ $(bash_completes macelium pl) == plan ]] || fail "macelium pl: $(bash_completes macelium pl)"
-  [[ $(bash_completes macelium plan --n) == --notify ]] || fail "plan --n: $(bash_completes macelium plan --n)"
-  [[ $(bash_completes macelium help sett) == settings ]] || fail "help sett: $(bash_completes macelium help sett)"
-  mkdir -p "$sandbox/a-dir"
-  touch "$sandbox/a-file"
-  cd "$sandbox" || fail "no sandbox"
-  [[ $(bash_completes macelium init a-) == a-dir ]] || fail "init a-: $(bash_completes macelium init a-)"
-  [[ $(bash_completes macelium setup me/state a-) == a-dir ]] || fail "setup me/state a-: $(bash_completes macelium setup me/state a-)"
-  [[ $(bash_completes macelium settings --file a-f) == a-file ]] || fail "settings --file a-f: $(bash_completes macelium settings --file a-f)"
+test_the_generated_completions_parse() {
+  "$tool" completion bash | bash -n || fail "the bash completion does not parse"
+  "$tool" completion zsh | zsh -n || fail "the zsh completion does not parse"
 }

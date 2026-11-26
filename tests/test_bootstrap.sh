@@ -50,39 +50,37 @@ test_banner_skips_a_terminal_too_narrow_or_short() {
   local size
   for size in 'rows 24 cols 63' 'rows 14 cols 80'; do
     # shellcheck disable=SC2016 # expanded by the inner bash
-    run_tty_raw 1 /bin/bash -c 'stty $2; source "$1"; print_banner' _ "$tool" "$size"
+    run_tty_raw 1 /bin/bash -c 'stty $2; "$1" __banner' _ "$harness" "$size"
     assert_status 0
     [[ ! -s $out ]] || fail "the banner drew with $size"
   done
 }
 
-test_banner_keeps_an_exit_trap_set_before_it() {
-  # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 1 /bin/bash -c 'source "$1"; trap "echo earlier trap ran" EXIT; print_banner' _ "$tool"
+test_banner_shows_the_cursor_it_hid() {
+  run_tty_raw 1 "$harness" __banner
   assert_status 0
-  assert_contains "$out" "earlier trap ran"
+  local raw
+  raw=$(cat "$out")
+  [[ $raw == *$'\033[?25l'* ]] || fail "the cursor was not hidden"
+  [[ ${raw##*$'\033[?25l'} == *$'\033[?25h'* ]] || fail "the cursor was not shown again"
 }
 
 test_banner_without_color_under_no_color() {
-  # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner' _ "$tool"
+  run_tty_raw 1 /usr/bin/env NO_COLOR=1 "$harness" __banner
   assert_status 0
   assert_contains "$out" "m a c e l i u m"
   if grep -qE $'\033\\[[0-9;]*m' "$out"; then fail "a color escape under NO_COLOR"; fi
 }
 
 test_banner_names_the_version_after_macelium() {
-  local version
-  version=$(grep -E '^VERSION=' "$tool" | head -n 1 | cut -d '"' -f 2)
-  # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner' _ "$tool"
+  run_tty_raw 1 /usr/bin/env NO_COLOR=1 "$harness" __banner
   assert_status 0
   assert_contains "$out" "m a c e l i u m  $version"
 }
 
 test_banner_ends_on_a_blank_line() {
   # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c 'source "$1"; print_banner; echo after' _ "$tool"
+  run_tty_raw 1 /usr/bin/env NO_COLOR=1 /bin/bash -c '"$1" __banner; echo after' _ "$harness"
   assert_status 0
   grep -A1 -F "m a c e l i u m" "$out" | tail -n 1 | grep -qx $'\r*' ||
     fail "no blank line after the banner"
@@ -98,96 +96,13 @@ test_bootstrap_says_what_it_does_before_sudo_asks() {
     "password one or more times as part of installation." "STUB sudo Password:"
 }
 
-# A logged step's status line, its sudo detection, and its output.
-
-sha=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-
-# Sources macelium for its functions, with Homebrew's cache in the sandbox.
-source_macelium() {
-  # shellcheck source=/dev/null
-  source "$tool"
-  export STUB_BREW_CACHE=$sandbox/cache
-  mkdir -p "$STUB_BREW_CACHE/downloads"
-  step_log=$sandbox/bootstrap.log
-  sizes=$sandbox/sizes
-}
-
-# Takes a download's name and a byte count, which it grows by.
-grow() {
-  head -c "$2" /dev/zero >>"$STUB_BREW_CACHE/downloads/$sha--$1.incomplete"
-}
-
-# Takes a tick's number, setting line to brew bundle's status at it.
-status_at() {
-  line=$(step_status "brew bundle" $(($1 * tick)) "$(brew --cache)" "$sizes" "$1")
-}
-
-test_step_status_shows_the_growing_download_with_its_rate() {
-  source_macelium
-  grow Name.dmg 10240
-  grow Stale.dmg 4096
-  status_at 0
-  grow Name.dmg 2097152
-  status_at 1
-  [[ $line == "  ... brew bundle, 5 s: downloading Name.dmg, 2 MB, 409 KB/s" ]] || fail "status: $line"
-}
-
-test_step_status_shows_a_stopped_download_as_stalled() {
-  source_macelium
-  status_at 0
-  grow Name.dmg 2097152
-  status_at 1
-  status_at 2
-  status_at 3
-  [[ $line == *"downloading Name.dmg"* ]] || fail "status before three ticks: $line"
-  status_at 4
-  [[ $line == "  ... brew bundle, 20 s: Name.dmg stalled at 2 MB, no growth for 15 s" ]] || fail "status: $line"
-}
-
-test_step_status_counts_the_other_growing_downloads() {
-  source_macelium
-  status_at 0
-  grow Big.dmg 2097152
-  grow Small.dmg 1024
-  grow Other.pkg 1024
-  status_at 1
-  [[ $line == *"downloading Big.dmg, 2 MB, 409 KB/s (+2 more)" ]] || fail "status: $line"
-}
-
-test_step_status_without_downloads_shows_the_step_and_time() {
-  source_macelium
-  grow Stale.dmg 4096
-  status_at 0
-  status_at 13
-  [[ $line == "  ... brew bundle, 1 min" ]] || fail "status: $line"
-}
-
-ps_output='    1     0 /sbin/launchd
-  500     1 /bin/zsh
-  600   500 /bin/bash
-  601   600 /usr/bin/sudo
-  602   600 /usr/bin/sudo
-  603   602 /usr/sbin/installer
-  700     1 /usr/bin/sudo'
-
-test_prompting_sudo_finds_a_childless_sudo_below_the_root() {
-  source_macelium
-  [[ $(prompting_sudo "$ps_output" 500) == 601 ]] || fail "expected 601"
-}
-
-test_prompting_sudo_ignores_a_sudo_with_a_child_or_outside_the_root() {
-  source_macelium
-  if prompting_sudo "$(grep -v ' 601 ' <<<"$ps_output")" 500; then
-    fail "found a sudo running a command, or one outside the tree"
-  fi
-}
+# A logged step's display, its sudo detection, and its output. Its status
+# line and the sudo detection on their own are internal/term's tests.
 
 # Takes a step's command. Runs it as a logged step on a terminal, with a
 # tick of a second, keeping what the terminal showed as raw bytes.
 logged_step_on_tty() {
-  # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 4 /bin/bash -c 'source "$1"; shift; tick=1 step_log=$HOME/bootstrap.log; run_logged_step step "$@"' \
-    _ "$tool" "$@"
+  run_tty_raw 4 "$harness" __logged-step --tick 1 step "$@"
 }
 
 waiting_hint_text='waiting for input above (likely a password)'
@@ -271,18 +186,10 @@ test_logged_step_turns_its_spinner_in_place() {
   [[ $raw == *$'\0337\r  '???$'\0338'* ]] || fail "no spinner frame was drawn in place"
 }
 
-test_every_spinner_frame_is_as_wide_as_the_status_it_replaces() {
-  source_macelium
-  local frame
-  for frame in "${spinner[@]}"; do
-    ((${#frame} == 3)) || fail "frame [$frame] is ${#frame} columns wide"
-  done
-}
-
 test_logged_step_cuts_its_status_to_the_terminal_width() {
   # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 3 /bin/bash -c 'stty cols 30; source "$1"; tick=1 step_log=$HOME/bootstrap.log; run_logged_step "a step with a long name" sleep 1.5' \
-    _ "$tool"
+  run_tty_raw 3 /bin/bash -c 'stty cols 30; "$1" __logged-step --tick 1 "a step with a long name" sleep 1.5' \
+    _ "$harness"
   assert_status 0
   local raw shown
   raw=$(cat "$out")
@@ -294,35 +201,41 @@ test_logged_step_cuts_its_status_to_the_terminal_width() {
   ((${#shown} == 20)) || fail "status is ${#shown} columns wide: $shown"
 }
 
-test_logged_step_off_a_terminal_prints_plain_lines() {
-  source_macelium
-  run_logged_step "brew bundle" brew bundle >"$sandbox/out" 2>&1
+# Takes a step's name and command. Runs it as a logged step with no
+# terminal and Homebrew's cache in the sandbox, setting status, out to its
+# output and results to how it recorded the step.
+logged_step_off_tty() {
+  export STUB_BREW_CACHE=$sandbox/cache
+  mkdir -p "$STUB_BREW_CACHE/downloads"
   out=$sandbox/out
+  "$harness" __logged-step --results "$@" >"$out" 2>&1 </dev/null
+  # shellcheck disable=SC2034 # assert_status reads it
+  status=$?
+  results=$(sed -n 's/^results: //p' "$out")
+}
+
+test_logged_step_off_a_terminal_prints_plain_lines() {
+  logged_step_off_tty "brew bundle" brew bundle
   [[ $(cat "$out") != *[$'\r\033']* ]] || fail "a \\r or escape in the output"
-  assert_contains "$out" "==> brew bundle (output in $step_log)"
+  assert_contains "$out" "==> brew bundle (output in $HOME/bootstrap.log)"
   assert_contains "$STUB_LOG" "brew --cache"
-  [[ $step_results == $'brew bundle\tok\n' ]] || fail "results: $step_results"
+  [[ $results == $'brew bundle\tok' ]] || fail "results: $results"
 }
 
 test_logged_step_records_a_failing_command() {
-  source_macelium
-  run_logged_step fails bash -c 'echo "Installing x"; echo "Error: it broke"; exit 3' >"$sandbox/out" 2>&1
-  # shellcheck disable=SC2034 # assert_status reads it
-  status=$?
-  out=$sandbox/out
+  logged_step_off_tty fails bash -c 'echo "Installing x"; echo "Error: it broke"; exit 3'
   assert_status 3
   assert_contains "$out" "Installing x"
   assert_contains "$out" "Failed, exit status 3:"
   assert_contains "$out" "Error: it broke"
-  [[ $step_results == $'fails\tfailed\n' ]] || fail "results: $step_results"
+  [[ $results == $'fails\tfailed' ]] || fail "results: $results"
   assert_not_contains "$STUB_LOG" "brew --cache"
 }
 
 test_logged_step_returns_at_once_when_its_command_does() {
-  source_macelium
   local started=$SECONDS
-  run_logged_step quick true >/dev/null
-  ((SECONDS - started < 2)) || fail "took $((SECONDS - started)) s with a tick of $tick s"
+  logged_step_off_tty quick true
+  ((SECONDS - started < 2)) || fail "took $((SECONDS - started)) s with a tick of 5 s"
 }
 
 test_bootstrap_applies_a_script_whose_path_has_a_space() {

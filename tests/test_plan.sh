@@ -31,22 +31,19 @@ test_plan_compares_a_setting_whose_domain_is_a_path() {
 
 # The spinner while plan and apply check.
 
-test_with_spinner_turns_beside_its_label_and_keeps_what_the_command_sets() {
+test_with_spinner_turns_beside_its_label_then_clears_its_line() {
   # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 2 /bin/bash -c 'source "$1"; set_it() { sleep 0.5; it=set; }; with_spinner "Working it out" set_it; printf "[%s]\n" "$it"' \
-    _ "$tool"
+  run_tty_raw 2 /bin/bash -c '"$1" __with-spinner "Working it out" sleep 0.5; printf "[done]\n"' _ "$harness"
   assert_status 0
   local raw
   raw=$(cat "$out")
   [[ $raw == *$'\r  '???' Working it out'* ]] || fail "no spinner frame was drawn beside the label"
-  [[ $raw == *$'\r\033[K[set]'* ]] || fail "the line was not cleared, or the command's variable was lost"
+  [[ $raw == *$'\r\033[K[done]'* ]] || fail "the line was not cleared"
 }
 
 test_with_spinner_off_a_terminal_draws_nothing() {
-  # shellcheck source=/dev/null
-  source "$tool"
   local status
-  with_spinner "Working it out" false >"$sandbox/out"
+  "$harness" __with-spinner "Working it out" false >"$sandbox/out" </dev/null
   status=$?
   ((status == 1)) || fail "with_spinner returned $status, not the command's 1"
   [[ ! -s $sandbox/out ]] || fail "drew: $(cat "$sandbox/out")"
@@ -64,7 +61,7 @@ test_plan_on_a_terminal_shows_the_spinner_then_the_plan() {
 
 test_with_spinner_cuts_its_line_to_the_terminal_width_and_turns_in_place() {
   # shellcheck disable=SC2016 # expanded by the inner bash
-  run_tty_raw 2 /bin/bash -c 'stty cols 20; source "$1"; with_spinner "a label far wider than the terminal" sleep 0.5' _ "$tool"
+  run_tty_raw 2 /bin/bash -c 'stty cols 20; "$1" __with-spinner "a label far wider than the terminal" sleep 0.5' _ "$harness"
   assert_status 0
   local raw
   raw=$(cat "$out")

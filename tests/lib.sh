@@ -6,16 +6,22 @@
 # The terminal's end-of-file character, ^D, as an answer to run_tty.
 eof=$'\x04'
 
-tool=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)/macelium
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+tool=$root/macelium
+# The test build of macelium, with the hidden commands and the stand-ins
+# for setup's bootstrap and init that tests/run.sh builds.
+harness=$root/tests/.build/macelium-harness
+# shellcheck disable=SC2034 # the tests read it
+version=$(cat "$root/VERSION")
 
 # A temporary home, the stubs first on PATH, and an empty call log.
 setup_sandbox() {
   # pwd -P, since macOS's temporary directory is under a symlink.
   sandbox=$(cd "$(mktemp -d)" && pwd -P)
   trap 'rm -rf "$sandbox"' EXIT
-  export HOME=$sandbox/home STUB_LOG=$sandbox/calls.log STUB_MACELIUM=$tool
+  export HOME=$sandbox/home STUB_LOG=$sandbox/calls.log STUB_MACELIUM=$harness
   mkdir -p "$HOME" "$sandbox/bin"
-  cp "$(dirname "$tool")"/tests/stubs/* "$sandbox/bin/"
+  cp "$root"/tests/stubs/* "$sandbox/bin/"
   export PATH=$sandbox/bin:$PATH
   unset XDG_CONFIG_HOME XDG_DATA_HOME STUB_SOURCE_PATH STUB_CHEZMOI_STATUS STUB_CHEZMOI_MANAGED STUB_CHEZMOI_APPLY_READS STUB_BREW_UNLISTED STUB_BREW_OUTDATED \
     STUB_BREW_UPGRADE_FAILS STUB_BREW_BUNDLE_OUTPUT STUB_BREW_BUNDLE_FAILS STUB_BREW_PREFIX STUB_BREW_CACHE STUB_BREW_DUMP STUB_SUDO_ASKS STUB_FDESETUP_STATUS STUB_FDESETUP_FAILS GIT_CONFIG_GLOBAL MACELIUM_UPGRADED_FROM \

@@ -3,8 +3,10 @@
 # runnable locally from any checkout:
 #   - gitleaks over the commits in a range (default origin/main..HEAD)
 #   - shellcheck over every shell script in the repo
-#   - the tests, tests/run.sh
-# Needs gitleaks and shellcheck on PATH (exits 2 naming any that is missing).
+#   - golangci-lint and gofmt over the Go, its test build's included
+#   - the Go tests, then the shell tests, tests/run.sh
+# Needs gitleaks, shellcheck, go and golangci-lint on PATH (exits 2 naming
+# any that is missing).
 # Runs every check and exits 1 if any failed.
 #
 # Usage: .github/check.sh [<git log range>]
@@ -13,7 +15,7 @@ set -euo pipefail
 range=${1:-origin/main..HEAD}
 
 missing=()
-for tool in gitleaks shellcheck; do
+for tool in gitleaks shellcheck go golangci-lint; do
   command -v "$tool" >/dev/null || missing+=("$tool")
 done
 if ((${#missing[@]})); then
@@ -46,8 +48,14 @@ while IFS= read -r -d '' f; do
   fi
 done < <(git ls-files -z --cached --others --exclude-standard)
 
-echo "== tests"
-tests/run.sh || failed+=(tests)
+echo "== lint"
+make --no-print-directory lint || failed+=(lint)
+
+echo "== go tests"
+make --no-print-directory gotest || failed+=("go tests")
+
+echo "== shell tests"
+tests/run.sh || failed+=("shell tests")
 
 if ((${#failed[@]})); then
   echo

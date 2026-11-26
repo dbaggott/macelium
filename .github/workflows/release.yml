@@ -1,23 +1,27 @@
 name: release
 
-# A merge to main that bumps VERSION= in the macelium script IS a release:
-# this workflow tags the commit v<VERSION>, publishes a GitHub Release with
-# generated notes and install.sh attached, and updates the Homebrew tap
-# formula. Pushes that don't change VERSION (or re-runs after a release)
-# find the tag already present and skip the tag/release step. Tagging,
+# A merge to main that changes VERSION IS a release: this workflow tags the
+# commit v<VERSION>, GoReleaser builds the macOS binaries and publishes a
+# GitHub Release with them and install.sh attached (.goreleaser.yaml), and
+# the workflow writes the Homebrew tap's formula, which installs the
+# binaries. Pushes that don't change VERSION (or re-runs after a release)
+# find the tag already present and skip the tag and the release. Tagging,
 # releasing, and the tap update live in one workflow because tags created
-# with the workflow's GITHUB_TOKEN do not trigger other workflows. The verify job then installs
-# what the tap now holds and checks the service's plist
+# with the workflow's GITHUB_TOKEN do not trigger other workflows. The verify
+# job then installs what the tap now holds and checks the service's plist
 # (.github/verify-formula.sh).
 #
-# workflow_dispatch (main only) re-runs the sha + tap steps against the
+# workflow_dispatch (main only) re-runs the formula's steps against the
 # existing release, recovering a release-created-but-tap-push-failed run;
 # it is idempotent when the tap is already current.
+#
+# TAP_GITHUB_TOKEN must be a PAT with write access to dbaggott/homebrew-tap
+# (GITHUB_TOKEN cannot push to another repo).
 
 on:
   push:
     branches: [main]
-    paths: ['macelium']
+    paths: ['VERSION']
   workflow_dispatch:
 
 permissions:
@@ -40,13 +44,16 @@ jobs:
     steps:
       - name: Checkout macelium
         uses: actions/checkout@v7
+        with:
+          # GoReleaser's changelog reads the history.
+          fetch-depth: 0
 
-      - name: Read script version and check for existing tag
+      - name: Read the version and check for an existing tag
         id: meta
         run: |
-          version="$(grep -E '^VERSION=' macelium | head -1 | cut -d'"' -f2)"
-          if [[ -z "$version" ]]; then
-            echo "::error::could not read VERSION from macelium script"
+          version="$(cat VERSION)"
+          if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::VERSION holds '$version', not a version"
             exit 1
           fi
           tag="v$version"
@@ -74,24 +81,43 @@ jobs:
             echo "version=$version"
           } >>"$GITHUB_OUTPUT"
 
-      - name: Create tag and GitHub release
+      - name: Tag the release
         if: steps.meta.outputs.new == 'true'
+        run: |
+          git tag "${{ steps.meta.outputs.tag }}" "$GITHUB_SHA"
+          git push origin "${{ steps.meta.outputs.tag }}"
+
+      - uses: actions/setup-go@v5
+        if: steps.meta.outputs.new == 'true'
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build and publish the release
+        if: steps.meta.outputs.new == 'true'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read the binaries' SHA256s
+        if: steps.meta.outputs.write_tap == 'true'
+        id: sha
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.meta.outputs.tag }}" install.sh \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "${{ steps.meta.outputs.tag }}" \
-            --generate-notes
-
-      - name: Compute tarball SHA256
-        if: steps.meta.outputs.write_tap == 'true'
-        id: sha
-        run: |
-          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${{ steps.meta.outputs.tag }}.tar.gz" -o tarball.tgz
-          sha="$(sha256sum tarball.tgz | awk '{print $1}')"
-          echo "sha256=$sha" >>"$GITHUB_OUTPUT"
+          gh release download "${{ steps.meta.outputs.tag }}" --repo "$GITHUB_REPOSITORY" \
+            --pattern checksums.txt --output checksums.txt --clobber
+          for arch in arm64 amd64; do
+            sha="$(awk -v name="macelium_darwin_$arch.tar.gz" '$2 == name { print $1 }' checksums.txt)"
+            if [[ -z $sha ]]; then
+              echo "::error::checksums.txt has no macelium_darwin_$arch.tar.gz"
+              exit 1
+            fi
+            echo "$arch=$sha" >>"$GITHUB_OUTPUT"
+          done
 
       - name: Checkout homebrew-tap
         if: steps.meta.outputs.write_tap == 'true'
@@ -105,34 +131,43 @@ jobs:
         if: steps.meta.outputs.write_tap == 'true'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
-          TAG:     ${{ steps.meta.outputs.tag }}
-          SHA256:  ${{ steps.sha.outputs.sha256 }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          SHA_ARM: ${{ steps.sha.outputs.arm64 }}
+          SHA_INTEL: ${{ steps.sha.outputs.amd64 }}
         run: |
           mkdir -p tap/Formula
-          # No explicit `version` line: brew infers it from the tag in the
-          # url, and `brew audit` flags a derivable version as redundant.
-          # The service is the drift check: StartCalendarInterval of 09:00,
-          # run on wake when the Mac slept through it, and not on load, which
-          # Homebrew's service otherwise defaults to. std_service_path_env
-          # puts Homebrew's bin on PATH without naming a prefix.
+          download="https://github.com/${GITHUB_REPOSITORY}/releases/download/$TAG"
+          # The formula installs the release's binary for the Mac's
+          # architecture, and the completions macelium generates. The service
+          # is the drift check: StartCalendarInterval of 09:00, run on wake
+          # when the Mac slept through it, and not on load, which Homebrew's
+          # service otherwise defaults to. std_service_path_env puts
+          # Homebrew's bin on PATH without naming a prefix.
           cat >tap/Formula/macelium.rb <<RUBY
           class Macelium < Formula
             desc "Set up a Mac from a state repo and keep it there"
             homepage "https://github.com/dbaggott/macelium"
-            url "https://github.com/dbaggott/macelium/archive/refs/tags/$TAG.tar.gz"
-            sha256 "$SHA256"
+            version "$VERSION"
             license "MIT"
 
+            depends_on :macos
             depends_on "chezmoi"
             depends_on "gh"
             depends_on "gitleaks"
-            depends_on "jq"
             depends_on "mise"
+
+            on_arm do
+              url "$download/macelium_darwin_arm64.tar.gz"
+              sha256 "$SHA_ARM"
+            end
+            on_intel do
+              url "$download/macelium_darwin_amd64.tar.gz"
+              sha256 "$SHA_INTEL"
+            end
 
             def install
               bin.install "macelium"
-              bash_completion.install "completions/macelium.bash" => "macelium"
-              zsh_completion.install "completions/_macelium"
+              generate_completions_from_executable(bin/"macelium", "completion")
             end
 
             service do
