@@ -165,6 +165,12 @@ install_macelium() {
   }
 
   has_terminal && install_tools || return 1
+  # A tap whose formula is not yet the release this script came from, or
+  # that brew did not refresh, can install a macelium from before setup.
+  if ! macelium help setup >/dev/null 2>&1; then
+    echo "install.sh: stopped: the macelium Homebrew installed has no setup command; run brew update && brew upgrade dbaggott/tap/macelium, then install.sh again" >&2
+    return 1
+  fi
   exec macelium setup "$@" </dev/tty
 }
 

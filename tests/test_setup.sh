@@ -791,6 +791,7 @@ test_setup_guided_shows_secrets_found_and_pushes_nothing_by_default_then_resumes
   assert_contains "$out" "Nothing was pushed."
   # shellcheck disable=SC2088 # the message's ~
   assert_contains "$out" "~/.zshrc.local or ~/.gitconfig.local"
+  assert_contains "$out" "fold the change into init's commit (git -C $HOME/macelium-state commit -a --amend --no-edit)"
   assert_not_contains "$STUB_LOG" "gh repo create"
   assert_not_contains "$STUB_LOG" "macelium bootstrap"
   [[ ! -e $sandbox/github/me/macelium-state.git ]] || fail "created the repo"

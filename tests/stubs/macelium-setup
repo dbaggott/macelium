@@ -1,9 +1,9 @@
 #!/bin/bash
 # Runs macelium setup, the macelium in $STUB_MACELIUM, with its bootstrap
-# and init stubbed: each records its call and whether stdin is a terminal,
-# bootstrap exits $STUB_MACELIUM_STATUS, and init writes a repo with
-# macelium.conf and one commit, as the real one does. With --init <path>,
-# it only writes that repo.
+# and init's capture stubbed: each records its call and whether stdin is a
+# terminal, bootstrap exits $STUB_MACELIUM_STATUS, and the capture writes a
+# repo with macelium.conf and one commit, as the real one does. With
+# --init <path>, it only writes that repo.
 
 # Takes the path, and writes init's repo there.
 capture() {
@@ -28,9 +28,11 @@ bootstrap() {
   return "${STUB_MACELIUM_STATUS:-0}"
 }
 
-init_command() {
-  echo "macelium init $* tty=$(stub_tty)" >>"$STUB_LOG"
-  capture "${!#}"
+capture_mac() {
+  local flag=''
+  [[ $1 == no ]] || flag='--public '
+  echo "macelium init $flag$2 tty=$(stub_tty)" >>"$STUB_LOG"
+  capture "$2"
 }
 
 # shellcheck disable=SC2034 # macelium's messages read it

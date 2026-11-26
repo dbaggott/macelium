@@ -2731,7 +2731,7 @@ append_local() {
 }
 
 # Takes [--public] and the path. Captures this Mac into a new state repo at
-# the path, a git repo with one commit and no remote (README.md, "Commands").
+# the path (README.md, "Commands"), then says what to do next.
 init_command() {
   local public=no path=''
   while (($#)); do
@@ -2747,6 +2747,15 @@ init_command() {
     shift
   done
   [[ -n $path ]] || usage_error "missing <path>"
+  capture_mac "$public" "$path" || return 1
+  echo "Next, push it to a new repo, then run macelium bootstrap $path."
+}
+
+# Takes whether the repo will be public, yes or no, and the path. Captures
+# this Mac into a new state repo at the path, a git repo with one commit and
+# no remote.
+capture_mac() {
+  local public=$1 path=$2
   refuse_foreign_chezmoi || return 1
   if [[ -e $path && ! -d $path ]] || [[ -d $path && -n $(ls -A "$path") ]]; then
     print_error "$path exists and is not empty: name a new or empty directory"
@@ -2828,8 +2837,6 @@ init_command() {
   printf '\nState repo: %s, with one commit and no remote.\n' "$path"
   [[ -z $gitconfig_moved ]] || echo "Moved lines that look like secrets to ~/.gitconfig.local."
   [[ -z $zshrc_moved ]] || echo "Moved lines that look like secrets to ~/.zshrc.local."
-  # setup goes on to the push and the bootstrap itself.
-  [[ $subcommand != init ]] || echo "Next, push it to a new repo, then run macelium bootstrap $path."
 }
 
 # --- setup ------------------------------------------------------------------
@@ -3160,7 +3167,10 @@ scan_for_secrets() {
   secrets_found=no
   print_heading "Scanning $path for secrets (gitleaks)"
   if ! command -v gitleaks >/dev/null; then
-    echo "Warning: gitleaks is not installed, so nothing checked $path for secrets before the push. Look it over yourself, or run brew install gitleaks, then macelium setup again." >&2
+    local skipped="gitleaks is not installed, so nothing checked $path for secrets before the push. Look it over yourself, or run brew install gitleaks, then macelium setup again."
+    echo "Warning: $skipped" >&2
+    # Again at the end of the bootstrap, which a skipped scan could otherwise scroll past.
+    warn "$skipped"
     return 0
   fi
   with_spinner "Scanning $path for secrets" run_gitleaks
@@ -3170,7 +3180,7 @@ scan_for_secrets() {
     "$gitleaks_found_status")
       secrets_found=yes
       printf '%s\n\n' "$gitleaks_output"
-      echo "Warning: gitleaks found what look like secrets in $path, shown above redacted. Pushing sends them to $name, and from there to every Mac set up from it. Remove each from the file, or move it to ~/.zshrc.local or ~/.gitconfig.local, which stay on this Mac, then amend the commit (git -C $path commit -a --amend --no-edit), since the push sends every commit." >&2
+      echo "Warning: gitleaks found what look like secrets in $path, shown above redacted. Pushing sends them to $name, and from there to every Mac set up from it. Remove each from the file, or move it to ~/.zshrc.local or ~/.gitconfig.local, which stay on this Mac, then fold the change into init's commit (git -C $path commit -a --amend --no-edit): the push sends every commit, so a later one that removes a secret still pushes it." >&2
       ;;
     *)
       printf '%s\n' "$gitleaks_output" >&2
@@ -3188,7 +3198,7 @@ review_before_push() {
   printf '\nThe new state repo is at %s.\n' "$path"
   ask_yes "Push $path to $name now? (You can inspect the files in another terminal first)" "$default" || return 1
   [[ $yes == no ]] || return 0
-  printf '%s\n' "Nothing was pushed. Look over and change $path as you need to, committing what you change." \
+  printf '%s\n' "Nothing was pushed. Look over and change $path as you need to, folding each change into init's commit (git -C $path commit -a --amend --no-edit) rather than adding one, since the push sends every commit." \
     "Run macelium setup again (or install.sh) to go on: it finds $path already captured, and scans it and asks again before it pushes."
 }
 
@@ -3262,10 +3272,10 @@ create_state_repo() {
       "Homebrew applications and, if you choose, your git, shell and mise settings." \
       "You'll be asked a few questions about what to include. Nothing is installed or" \
       "changed on your computer during this step."
-    local init_args=("$path")
-    [[ $public == no ]] || init_args=(--public "$path")
-    print_heading "macelium init ${init_args[*]}"
-    init_command "${init_args[@]}" || {
+    local flag=''
+    [[ $public == no ]] || flag='--public '
+    print_heading "macelium init $flag$path"
+    capture_mac "$public" "$path" || {
       print_stopped "macelium init failed"
       return 1
     }
@@ -3308,13 +3318,15 @@ go_on_from_found() {
   esac
 }
 
-# Asks for the state repo by name or URL, then goes on as the argument form
-# does for it.
+# Takes the question and what to say of a reply that names no repo, or
+# neither, for the question that takes either form. Asks for the state repo
+# until a reply names one, then finds it and goes on from what it found.
 ask_repo() {
+  local question=${1:-"Your state repo, as <owner>/<repo> on GitHub or a git URL"}
   while true; do
-    ask "Your state repo, as <owner>/<repo> on GitHub or a git URL" "" || return 1
+    ask "$question" "" || return 1
     set_repo "$answer" && break
-    print_error "that is neither <owner>/<repo> nor a git URL"
+    print_error "${2:-that is neither <owner>/<repo> nor a git URL}"
   done
   find_repo || return 1
   go_on_from_found
@@ -3327,13 +3339,7 @@ guided_setup() {
   choose "What source control provider do you use?" 1 "GitHub" "another git provider" || return 1
   if [[ $choice == 2 ]]; then
     tell_sign_in "Git host"
-    while true; do
-      ask "The state repo's git URL" "" || return 1
-      set_repo "$answer" && break
-      print_error "that is not a git URL"
-    done
-    find_repo || return 1
-    go_on_from_found
+    ask_repo "The state repo's git URL" "that is not a git URL"
     return
   fi
 
@@ -3416,30 +3422,25 @@ ask_username() {
   fi
 }
 
-# The state repo find_repo found without a sign-in: confirms it, offering a
-# clone of it at the default path, then goes on from it, or asks for another
-# repo.
+# The state repo find_repo found without a sign-in: confirms it, or offers
+# the clone of it at the default path, then goes on from it, or asks for
+# another repo.
 found_without_sign_in() {
-  local question="Set up this Mac from it?" cloned=no
+  local question="Set up this Mac from it?"
   if [[ $found == refs ]]; then
     echo "Found $url."
     path=$(default_path)
     read_path_state
     if [[ $path_state == named ]]; then
-      cloned=yes question="It is already cloned at $path. Set up this Mac from that clone?"
+      clone_asked_path
+      return
     fi
   else
     echo "Found $url, with nothing in it yet."
     question="Capture this Mac into it?"
   fi
   ask_yes "$question" yes || return 1
-  if [[ $cloned == yes ]]; then
-    if [[ $yes == yes ]]; then clone_and_bootstrap "$public" yes; else clone_asked_path ask; fi
-  elif [[ $yes == yes ]]; then
-    go_on_from_found ask
-  else
-    ask_repo
-  fi
+  if [[ $yes == yes ]]; then go_on_from_found ask; else ask_repo; fi
 }
 
 # Takes the state repo, as <owner>/<repo> on GitHub or a git URL, and the

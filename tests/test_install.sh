@@ -14,13 +14,18 @@ run_installer() {
 # naming macelium 1.0.0 until an upgrade, and whose `upgrade` fails when
 # $STUB_BREW_UPGRADE_FAILS is set and otherwise moves macelium to
 # $STUB_MACELIUM_LATEST when that is set; and a macelium that records its
-# call and whether stdin is a terminal, and exits $STUB_MACELIUM_STATUS.
+# call and whether stdin is a terminal, and exits $STUB_MACELIUM_STATUS, but
+# for its help, which fails when $STUB_MACELIUM_NO_SETUP is set.
 installable_mac() {
   cat >"$sandbox/bin/macelium" <<'STUB'
 #!/bin/bash
 tty=no
 [[ -t 0 ]] && tty=yes
 echo "macelium $* tty=$tty" >>"$STUB_LOG"
+if [[ $1 == help ]]; then
+  [[ -z ${STUB_MACELIUM_NO_SETUP:-} ]]
+  exit
+fi
 exit "${STUB_MACELIUM_STATUS:-0}"
 STUB
   cat >"$sandbox/bin/brew" <<'STUB'
@@ -97,5 +102,14 @@ test_install_stops_when_the_macelium_upgrade_fails() {
   assert_status 1
   assert_contains "$out" "Error: the upgrade failed"
   assert_contains "$out" "install.sh: stopped: brew upgrade dbaggott/tap/macelium failed"
+  assert_not_contains "$STUB_LOG" "macelium setup"
+}
+
+test_install_stops_when_the_installed_macelium_has_no_setup() {
+  installable_mac
+  export STUB_MACELIUM_NO_SETUP=1
+  run_tty -- bash "$installer" example/state
+  assert_status 1
+  assert_contains "$out" "install.sh: stopped: the macelium Homebrew installed has no setup command; run brew update && brew upgrade dbaggott/tap/macelium"
   assert_not_contains "$STUB_LOG" "macelium setup"
 }
