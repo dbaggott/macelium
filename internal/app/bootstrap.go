@@ -153,7 +153,7 @@ func (s *Session) checkPreflight() string {
 				problem("These apps are pre-installed and Homebrew needs to take over installation:\n\n" + blocked +
 					"\nYou can resolve this in one of two ways:\n\n" +
 					"  1. uninstall them by deleting them from /Applications (your user data will be preserved and Homebrew will install fresh copies)\n" +
-					"  2. temporarily grant " + terminal + " \"App Management\" permission (via System Settings -> Privacy & Security)")
+					"  2. grant " + terminal + " \"App Management\" permission (via System Settings -> Privacy & Security), and keep it: `macelium apply` needs it to upgrade apps too")
 			}
 		}
 	}

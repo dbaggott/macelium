@@ -172,7 +172,43 @@ func (s *Session) runLoggedStep(name string, st step) int {
 	for _, l := range errorLines {
 		s.println(l)
 	}
+	if len(st.argv) > 0 && st.argv[0] == "brew" {
+		for _, hint := range brewFailureHints(all, terminalApp()) {
+			s.println("")
+			s.println(hint)
+		}
+	}
 	return code
+}
+
+// A cask upgrade copies the installed app back into the Caskroom, then
+// deletes it from /Applications; when the delete fails the copy stays, and
+// each later upgrade refuses to overwrite it.
+var leftoverAppCopy = regexp.MustCompile(`It seems there is already an App at '([^']*/Caskroom/[^']*)'`)
+
+var appChangeRefused = regexp.MustCompile(`/Applications/.*(Operation not permitted|Permission denied)|(Operation not permitted|Permission denied).*/Applications/`)
+
+// brewFailureHints returns what to do about each failure in a brew step's
+// output it recognises. macOS refuses a change to another developer's app,
+// even root's, unless the terminal has App Management.
+func brewFailureHints(output []string, terminal string) []string {
+	refused, leftover := false, ""
+	for _, l := range output {
+		if m := leftoverAppCopy.FindStringSubmatch(l); m != nil && leftover == "" {
+			leftover = m[1]
+		}
+		refused = refused || appChangeRefused.MatchString(l)
+	}
+	var hints []string
+	if refused {
+		hints = append(hints, "macOS refused a change to an app in /Applications: give "+terminal+
+			" App Management (System Settings → Privacy & Security → App Management), quit and reopen it, then apply again.")
+	}
+	if leftover != "" {
+		hints = append(hints, "An earlier upgrade stopped partway and left a copy of the app at "+leftover+
+			": remove it (`rm -rf "+shellQuote(leftover)+"`), then apply again. If the upgrade fails again, its new error says why.")
+	}
+	return hints
 }
 
 func logOrDiscard(f *os.File) io.Writer {

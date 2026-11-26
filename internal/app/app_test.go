@@ -195,3 +195,33 @@ func TestUnlistedEntriesTakesOnlyWhatCleanupWouldRemove(t *testing.T) {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestBrewFailureHintsNameAppManagementAndTheLeftoverCopy(t *testing.T) {
+	cases := []struct {
+		name   string
+		output []string
+		want   []string
+	}{
+		{"an unrelated failure", []string{"Upgrading wget", "Error: wget: Download failed"}, nil},
+		{"a refused delete", []string{
+			"chown: /Applications/Shottr.app/Contents: Operation not permitted",
+			"Error: shottr: Permission denied @ apply2files - /Applications/Shottr.app/Contents/CodeResources",
+		}, []string{"App Management"}},
+		{"a leftover copy", []string{
+			"Error: shottr: It seems there is already an App at '/opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app'.",
+		}, []string{"rm -rf /opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app"}},
+		{"a permission failure outside /Applications", []string{"Error: Permission denied @ rb_sysopen - /opt/homebrew/var/x"}, nil},
+	}
+	for _, c := range cases {
+		got := brewFailureHints(c.output, "Ghostty")
+		if len(got) != len(c.want) {
+			t.Errorf("%s: hints %q, want %d", c.name, got, len(c.want))
+			continue
+		}
+		for i, w := range c.want {
+			if !strings.Contains(got[i], w) {
+				t.Errorf("%s: hint %q lacks %q", c.name, got[i], w)
+			}
+		}
+	}
+}
