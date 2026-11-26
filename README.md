@@ -1,28 +1,35 @@
-> **ma·ce·li·um** | `/mækˈsiːliəm/` (*mac-SEAL-ium* — the *c* is "loud," a biphonemic grapheme)  
+> **ma·ce·li·um** | `/mækˈsiːliəm/` (*mac-SEAL-ium*)  
 > *noun*  
-> Stupidly simple macOS environment management. Edit your setup normally with nothing to remember—featuring automatic drift resolution, one-step bootstrapping, and effortless adoption.
+> Stupidly simple macOS environment management.
+
+## Why Macelium?
+
+Macelium streamlines macOS setup and dotfile management:
+
+* **Edit normally:** Make changes and let scheduled checks track drift.
+* **Adopt your current Mac:** Run `macelium setup` to snapshot your environment and scan for secrets via [gitleaks](https://github.com).
+* **Smart macOS settings:** `macos.sh` monitors real system state and safely handles service restarts.
+* **Zero lock-in:** Built on standard tools like `chezmoi` and `Brewfile`.
 
 ## Adopt
 
-Install Macelium and run `macelium setup` — it snapshots your current apps and settings locally, scans the snapshot for secrets with [gitleaks](https://github.com), and waits for your go-ahead before pushing to your Git state repo and activating daily drift checks:
+Bootstrap or capture your environment with a single command:
 
-**Mac without Homebrew:**
+**Without Homebrew:**
 ```bash
 curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh | bash
 ```
 
-**Mac with Homebrew:**
+**With Homebrew:**
 ```bash
 brew install dbaggott/tap/macelium && macelium setup
 ```
 
-*(Already a Macelium user? Either command above handles that too.)*
-
 ## How it works
 
-1. **Use your Mac normally.** Install Homebrew packages, tweak macOS settings, or edit your dotfiles directly on your machine.
-2. **Automatic drift detection.** A background service runs `macelium plan --notify` daily to check if your Mac has drifted from your state repo—and alerts you when something changed.
-3. **One command to sync.** Run `macelium apply` to bring your machine and state repo back into alignment, or `macelium bootstrap` to replicate your entire setup onto a brand-new Mac.
+1. **Use your Mac normally:** Make direct changes to your setup.
+2. **Automatic drift detection:** Scheduled background checks run `macelium plan --notify` to catch discrepancies.
+3. **Sync on demand:** Run `macelium apply` to align your machine and repo, or `macelium bootstrap` to replicate your setup onto a new Mac.
 
 ---
 
@@ -30,12 +37,12 @@ brew install dbaggott/tap/macelium && macelium setup
 
 | Command | What it does |
 | :--- | :--- |
-| `macelium setup [<owner>/<repo>\|<git URL>] [<path>]` | Finds your state repo and sets up this Mac from it—or, with none, captures this Mac into a new one, scans it for secrets, and pushes it once you say so. Re-running picks up where it stopped. |
-| `macelium init [--public] <path>` | Captures your current Homebrew apps, dotfiles, and settings into a new state repo. |
-| `macelium bootstrap [<checkout>]` | Sets up a Mac from an existing state repo. |
-| `macelium plan [--notify]` | Shows what has drifted between your Mac and your state repo (optionally posting a macOS notification). |
-| `macelium apply` | Resolves drift, updates packages/settings/dotfiles, and runs app hooks. |
-| `macelium settings [--file <path>]` | Captures or checks macOS `defaults` settings. |
+| `macelium setup [<owner>/<repo>\|<git URL>] [<path>]` | Locates or creates a state repository to set up or capture your Mac, handling secret scans and resuming where it left off. |
+| `macelium init [--public] <path>` | Initializes a new state repository with your current Homebrew apps, dotfiles, and settings. |
+| `macelium bootstrap [<checkout>]` | Configures a Mac using an existing state repository. |
+| `macelium plan [--notify]` | Compares your Mac against your state repo to report drift, with optional macOS notifications. |
+| `macelium apply` | Applies updates to packages, settings, dotfiles, and app hooks to resolve drift. |
+| `macelium settings [--file <path>]` | Applies macOS settings that deviate from your configured list. |
 
 ## Inside the state repo
 
