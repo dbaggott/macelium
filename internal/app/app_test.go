@@ -209,11 +209,20 @@ func TestBrewFailureHintsNameAppManagementAndTheLeftoverCopy(t *testing.T) {
 		}, []string{"App Management"}},
 		{"a leftover copy", []string{
 			"Error: shottr: It seems there is already an App at '/opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app'.",
-		}, []string{"rm -rf /opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app"}},
-		{"a permission failure outside /Applications", []string{"Error: Permission denied @ rb_sysopen - /opt/homebrew/var/x"}, nil},
+		}, []string{"mv /opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app ~/.Trash/"}},
+		{"two leftover copies, one twice", []string{
+			"Error: shottr: It seems there is already an App at '/opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app'.",
+			"Error: tom: It seems there is already an App at '/opt/homebrew/Caskroom/tom/1.0/Tom's App.app'.",
+			"Error: shottr: It seems there is already an App at '/opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app'.",
+		}, []string{"Shottr.app ~/.Trash/", `Tom\'s\ App.app ~/.Trash/`}},
+		{"a permission failure outside /Applications", []string{
+			"Error: Permission denied @ rb_sysopen - /opt/homebrew/var/x",
+			"xattr: /System/Applications/Mail.app: Operation not permitted",
+			"chown: /Users/me/Applications/x.app: Operation not permitted",
+		}, nil},
 	}
 	for _, c := range cases {
-		got := brewFailureHints(c.output, "Ghostty")
+		got := brewFailureHints(c.output, func() string { return "Ghostty" })
 		if len(got) != len(c.want) {
 			t.Errorf("%s: hints %q, want %d", c.name, got, len(c.want))
 			continue

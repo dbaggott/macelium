@@ -74,7 +74,7 @@ Error: shottr: It seems there is already an App at '/opt/homebrew/Caskroom/shott
   run_tty y -- "$tool" apply
   assert_status 1
   assert_order "$out" "Error: the bundle failed" "App Management (System Settings → Privacy & Security → App Management)" \
-    "rm -rf /opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app" "macelium apply: stopped: brew bundle, the state repo's Brewfile failed"
+    "mv /opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app ~/.Trash/" "macelium apply: stopped: brew bundle, the state repo's Brewfile failed"
 }
 
 test_apply_declined_changes_nothing() {
