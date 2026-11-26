@@ -189,8 +189,8 @@ var leftoverAppCopy = regexp.MustCompile(`It seems there is already an App at '(
 var appChangeRefused = regexp.MustCompile(`/Applications/.*(Operation not permitted|Permission denied)|(Operation not permitted|Permission denied).*/Applications/`)
 
 // brewFailureHints returns what to do about each failure in a brew step's
-// output it recognises. macOS refuses a change to another developer's app,
-// even root's, unless the terminal has App Management.
+// output it recognises. Unless the terminal has App Management, macOS
+// refuses any process, root included, a change to another developer's app.
 func brewFailureHints(output []string, terminal string) []string {
 	refused, leftover := false, ""
 	for _, l := range output {
@@ -202,11 +202,11 @@ func brewFailureHints(output []string, terminal string) []string {
 	var hints []string
 	if refused {
 		hints = append(hints, "macOS refused a change to an app in /Applications: give "+terminal+
-			" App Management (System Settings → Privacy & Security → App Management), quit and reopen it, then apply again.")
+			" App Management (System Settings → Privacy & Security → App Management), quit and reopen it, then try again.")
 	}
 	if leftover != "" {
 		hints = append(hints, "An earlier upgrade stopped partway and left a copy of the app at "+leftover+
-			": remove it (`rm -rf "+shellQuote(leftover)+"`), then apply again. If the upgrade fails again, its new error says why.")
+			": remove it (`rm -rf "+shellQuote(leftover)+"`), then try again. If the upgrade fails again, its new error says why.")
 	}
 	return hints
 }
