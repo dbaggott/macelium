@@ -2,9 +2,8 @@
 
 ## Contract
 
-The contract a state repo's `macelium.conf` names with `contract <n>`
-(README.md, "Contract"). A macelium refuses a state repo written to a newer
-contract than its own.
+The contract a state repo's `macelium.conf` names with `contract <n>`. A
+macelium refuses a state repo written to a newer contract than its own.
 
 - **1**: the state repo's layout, the manifest's `contract`, `brewfile`,
   `settings`, `apps` and `init_notes` declarations, the settings list's
