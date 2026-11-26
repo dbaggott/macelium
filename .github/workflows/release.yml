@@ -125,6 +125,7 @@ jobs:
 
             depends_on "chezmoi"
             depends_on "gh"
+            depends_on "gitleaks"
             depends_on "jq"
             depends_on "mise"
 

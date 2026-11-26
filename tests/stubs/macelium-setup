@@ -1,0 +1,38 @@
+#!/bin/bash
+# Runs macelium setup, the macelium in $STUB_MACELIUM, with its bootstrap
+# and init stubbed: each records its call and whether stdin is a terminal,
+# bootstrap exits $STUB_MACELIUM_STATUS, and init writes a repo with
+# macelium.conf and one commit, as the real one does. With --init <path>,
+# it only writes that repo.
+
+# Takes the path, and writes init's repo there.
+capture() {
+  mkdir -p "$1" && printf 'contract 1\n' >"$1/macelium.conf" && git init -q -b main "$1" &&
+    git -C "$1" add -A && git -C "$1" -c user.name=init -c user.email=init@example.com commit -q -m init
+}
+
+if [[ ${1:-} == --init ]]; then
+  capture "$2"
+  exit
+fi
+
+# shellcheck source=/dev/null
+source "$STUB_MACELIUM"
+
+stub_tty() {
+  if [[ -t 0 ]]; then echo yes; else echo no; fi
+}
+
+bootstrap() {
+  echo "macelium bootstrap $* tty=$(stub_tty)" >>"$STUB_LOG"
+  return "${STUB_MACELIUM_STATUS:-0}"
+}
+
+init_command() {
+  echo "macelium init $* tty=$(stub_tty)" >>"$STUB_LOG"
+  capture "${!#}"
+}
+
+# shellcheck disable=SC2034 # macelium's messages read it
+subcommand=setup
+setup_command "$@"

@@ -14,13 +14,16 @@ _macelium_compgen() {
 }
 
 _macelium() {
-  local commands='init bootstrap plan apply settings help'
+  local commands='setup init bootstrap plan apply settings help'
   local current=${COMP_WORDS[COMP_CWORD]} previous=${COMP_WORDS[COMP_CWORD - 1]}
   if ((COMP_CWORD == 1)); then
     _macelium_compgen -W "$commands -h --help -V --version"
     return
   fi
   case ${COMP_WORDS[1]} in
+    setup)
+      if [[ $current == -* ]]; then _macelium_compgen -W '-h --help'; elif ((COMP_CWORD == 3)); then _macelium_compgen -d; fi
+      ;;
     init)
       if [[ $current == -* ]]; then _macelium_compgen -W '--public -h --help'; else _macelium_compgen -d; fi
       ;;

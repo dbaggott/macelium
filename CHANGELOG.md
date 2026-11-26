@@ -14,6 +14,21 @@ contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.10.0
+
+- `macelium setup [<owner>/<repo>|<git URL>] [<path>]` finds the state repo
+  and sets this Mac up from it, or creates it, as `install.sh` did; with
+  Homebrew already installed, `brew install dbaggott/tap/macelium &&
+  macelium setup` is the whole install.
+- Before pushing a new state repo, `setup` scans its commits with gitleaks,
+  showing what it finds redacted, then shows the repo's path and asks
+  before the push, no by default when gitleaks found anything. A no pushes
+  nothing, and running `setup` again goes on from the scan. Without
+  gitleaks it warns that the scan was skipped.
+- The formula depends on gitleaks.
+- `install.sh` only installs Homebrew and macelium, or upgrades macelium,
+  then hands over to `macelium setup` with its arguments.
+
 ## 0.9.0
 
 - `install.sh` upgrades a macelium already installed to the latest before

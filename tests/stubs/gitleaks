@@ -1,0 +1,17 @@
+#!/bin/bash
+# Records the call. Finds nothing, unless $STUB_GITLEAKS_FINDS is set, when it
+# prints a redacted finding and exits with the status --exit-code names, or
+# $STUB_GITLEAKS_FAILS is, when it fails as on a path it can't scan.
+echo "gitleaks $*" >>"$STUB_LOG"
+if [[ -n ${STUB_GITLEAKS_FAILS:-} ]]; then
+  echo "FTL stat $2: no such file or directory" >&2
+  exit 1
+fi
+[[ -n ${STUB_GITLEAKS_FINDS:-} ]] || exit 0
+code=1
+while (($#)); do
+  [[ $1 != --exit-code ]] || code=$2
+  shift
+done
+printf '%s\n' 'Finding:     export API_TOKEN=REDACTED' 'Secret:      REDACTED' 'RuleID:      generic-api-key' 'File:        home/dot_zshrc'
+exit "$code"

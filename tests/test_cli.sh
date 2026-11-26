@@ -110,10 +110,11 @@ bash_completes() {
 test_the_bash_completion_completes_commands_options_and_paths() {
   [[ $(bash_completes macelium pl) == plan ]] || fail "macelium pl: $(bash_completes macelium pl)"
   [[ $(bash_completes macelium plan --n) == --notify ]] || fail "plan --n: $(bash_completes macelium plan --n)"
-  [[ $(bash_completes macelium help se) == settings ]] || fail "help se: $(bash_completes macelium help se)"
+  [[ $(bash_completes macelium help sett) == settings ]] || fail "help sett: $(bash_completes macelium help sett)"
   mkdir -p "$sandbox/a-dir"
   touch "$sandbox/a-file"
   cd "$sandbox" || fail "no sandbox"
   [[ $(bash_completes macelium init a-) == a-dir ]] || fail "init a-: $(bash_completes macelium init a-)"
+  [[ $(bash_completes macelium setup me/state a-) == a-dir ]] || fail "setup me/state a-: $(bash_completes macelium setup me/state a-)"
   [[ $(bash_completes macelium settings --file a-f) == a-file ]] || fail "settings --file a-f: $(bash_completes macelium settings --file a-f)"
 }
