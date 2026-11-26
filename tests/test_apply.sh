@@ -65,6 +65,18 @@ test_apply_stops_when_brew_bundle_fails() {
   assert_not_contains "$out" "Apply complete"
 }
 
+test_apply_says_what_to_do_when_macos_refuses_a_cask_upgrade() {
+  make_state macelium.conf $'contract 1\n' Brewfile $'cask "shottr"\n'
+  export STUB_CHEZMOI_STATUS=' M .zshrc'$'\n'
+  export STUB_BREW_BUNDLE_OUTPUT="chown: /Applications/Shottr.app/Contents: Operation not permitted
+Error: shottr: It seems there is already an App at '/opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app'."
+  export STUB_BREW_BUNDLE_FAILS=1
+  run_tty y -- "$tool" apply
+  assert_status 1
+  assert_order "$out" "Error: the bundle failed" "App Management (System Settings → Privacy & Security → App Management)" \
+    "mv /opt/homebrew/Caskroom/shottr/1.10.0/Shottr.app ~/.Trash/" "macelium apply: stopped: brew bundle, the state repo's Brewfile failed"
+}
+
 test_apply_declined_changes_nothing() {
   make_state macelium.conf $'contract 1\n' \
     apps/one/after-apply $'echo "hook one ran" >>"$STUB_LOG"\n'

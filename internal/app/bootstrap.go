@@ -153,7 +153,7 @@ func (s *Session) checkPreflight() string {
 				problem("These apps are pre-installed and Homebrew needs to take over installation:\n\n" + blocked +
 					"\nYou can resolve this in one of two ways:\n\n" +
 					"  1. uninstall them by deleting them from /Applications (your user data will be preserved and Homebrew will install fresh copies)\n" +
-					"  2. temporarily grant " + terminal + " \"App Management\" permission (via System Settings -> Privacy & Security)")
+					"  2. grant " + terminal + " \"App Management\" permission (via " + appManagementSettings + "), and keep it: `macelium apply` needs it to upgrade apps too")
 			}
 		}
 	}
@@ -169,7 +169,7 @@ func (s *Session) checkPreflight() string {
 			}
 			if _, err := os.ReadDir(fullDiskAccessProbe); len(sandboxed) > 0 && err != nil {
 				problem("The settings list has settings for " + strings.Join(sandboxed, ", ") + ", which macOS sandboxes, so reading and writing them needs Full Disk Access:\n\n" +
-					"  grant " + terminal + " \"Full Disk Access\" permission (via System Settings -> Privacy & Security)")
+					"  grant " + terminal + " \"Full Disk Access\" permission (via System Settings → Privacy & Security → Full Disk Access)")
 			}
 		}
 	}
@@ -189,7 +189,7 @@ func (s *Session) checkFileVault() {
 		"FYI: Your macOS FileVault is off. Enabling it is generally considered a security",
 		"best practice. If you want it, enable it through System Settings. Macelium will",
 		"work either way, and you can enable it after this process completes.")
-	s.warn("FileVault is off: enable it through System Settings -> Privacy & Security -> FileVault if you want it.")
+	s.warn("FileVault is off: enable it through System Settings → Privacy & Security → FileVault if you want it.")
 }
 
 // startSudo asks for the password once for macelium's own steps, and keeps

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/dbaggott/macelium/internal/run"
@@ -172,7 +173,52 @@ func (s *Session) runLoggedStep(name string, st step) int {
 	for _, l := range errorLines {
 		s.println(l)
 	}
+	if len(st.argv) > 0 && st.argv[0] == "brew" {
+		for _, hint := range brewFailureHints(all, terminalApp) {
+			s.println("")
+			s.println(hint)
+		}
+	}
 	return code
+}
+
+// The App Management pane of System Settings.
+const appManagementSettings = "System Settings → Privacy & Security → App Management"
+
+// A cask upgrade copies the installed app back into the Caskroom, then
+// deletes it from /Applications; when the delete fails the copy stays, and
+// each later upgrade refuses to overwrite it. Homebrew does not escape a
+// quote in the path, so the match runs to the message's last one.
+var leftoverAppCopy = regexp.MustCompile(`It seems there is already an App at '(.*/Caskroom/.*)'\.?$`)
+
+var (
+	applicationsPath = regexp.MustCompile(`(^|[\s'"])/Applications/`)
+	refusal          = regexp.MustCompile(`Operation not permitted|Permission denied`)
+)
+
+// brewFailureHints returns what to do about each failure in a brew step's
+// output it recognises. Unless the terminal has App Management, macOS
+// refuses any process, root included, a change to another developer's app.
+func brewFailureHints(output []string, terminal func() string) []string {
+	refused := false
+	var leftovers []string
+	for _, l := range output {
+		if m := leftoverAppCopy.FindStringSubmatch(l); m != nil && !slices.Contains(leftovers, m[1]) {
+			leftovers = append(leftovers, m[1])
+		}
+		refused = refused || applicationsPath.MatchString(l) && refusal.MatchString(l)
+	}
+	var hints []string
+	if refused {
+		hints = append(hints, "macOS refused a change to an app in /Applications: give "+terminal()+
+			" App Management ("+appManagementSettings+"), quit and reopen it, then try again.")
+	}
+	for _, copy := range leftovers {
+		hints = append(hints, "A cask upgrade stopped partway and left a copy of the app at "+copy+
+			". If the app in /Applications still opens, move the copy to the Trash (`mv "+shellQuote(copy)+
+			" ~/.Trash/`), then try again; if the upgrade fails again, its new error says why.")
+	}
+	return hints
 }
 
 func logOrDiscard(f *os.File) io.Writer {

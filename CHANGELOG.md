@@ -13,6 +13,16 @@ macelium refuses a state repo written to a newer contract than its own.
   `--version` and their exit statuses, and the files macelium keeps on the
   machine.
 
+## 0.11.1
+
+- When `brew bundle` fails because macOS refused a change to an app in
+  /Applications, `apply` and `bootstrap` say to give the terminal App
+  Management. When it fails because an earlier cask upgrade stopped partway
+  and left the app's copy in the Caskroom, they name each copy and how to
+  move it to the Trash.
+- `bootstrap`'s advice to grant App Management no longer says
+  "temporarily": `apply` needs it to upgrade apps too.
+
 ## 0.11.0
 
 - macelium is a Go binary, in place of the bash script, for macOS on Apple
