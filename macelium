@@ -2,7 +2,7 @@
 # Compares this machine with a state repo, and brings it in line, in the shape
 # of terraform's plan and apply. The state repo is a chezmoi source with
 # macelium.conf at its root, naming its Brewfile, settings list and apps
-# directory (README.md, "The state repo").
+# directory.
 #
 # `macelium --help` gives each command's usage.
 #
@@ -64,10 +64,9 @@
 # it watches, changed since the hooks last ran.
 set -uo pipefail
 
-# A merge to main that changes this line is a release (README.md, "Releasing").
+# A merge to main that changes this line is a release (.github/workflows/release.yml).
 VERSION="0.10.0"
-# How brew bundle check names macelium in a state repo's Brewfile, whose line
-# for it README.md ("The Brewfile's macelium line") gives.
+# How brew bundle check names macelium in a state repo's Brewfile.
 self_formula=dbaggott/tap/macelium
 
 # brew bundle runs brew update first unless this is set, which in apply would
@@ -78,7 +77,7 @@ local_brewfile="$HOME/.config/macelium/Brewfile.local"
 # The dotfiles command's per-machine Brewfile, which macelium does not read:
 # plan warns while it exists.
 state_dir="$HOME/.local/state/macelium"
-# The manifest contract this macelium reads (README.md, "Contract").
+# The manifest contract this macelium reads.
 known_contract=1
 # The agent's run on wake can start before the network is back, so --notify
 # retries the fetch; a plan or apply run by hand fetches once.
@@ -2584,8 +2583,7 @@ bootstrap() {
 # --- init -------------------------------------------------------------------
 
 # The line a captured ~/.zshrc ends with, and the section a captured
-# ~/.gitconfig ends with, so that each machine's own differences load last
-# (README.md, "Person values and machine differences").
+# ~/.gitconfig ends with, so that each machine's own differences load last.
 zshrc_local_line='[[ -r ~/.zshrc.local ]] && source ~/.zshrc.local'
 gitconfig_local_section=$'[include]\n\tpath = ~/.gitconfig.local'
 capture_name='' capture_email=''
@@ -2615,8 +2613,8 @@ ask_value() {
 }
 
 # Prints this Mac's formulae, casks and taps as a Brewfile, with macelium's
-# line as README.md ("The Brewfile's macelium line") gives it, in place of the
-# one brew bundle dump writes, or last when it writes none.
+# own line in place of the one brew bundle dump writes, or last when it
+# writes none.
 init_brewfile() {
   local dump line found=no
   local own="brew \"$self_formula\", trusted: true, restart_service: :always"
@@ -2732,7 +2730,7 @@ append_local() {
 }
 
 # Takes [--public] and the path. Captures this Mac into a new state repo at
-# the path (README.md, "Commands"), then says what to do next.
+# the path, then says what to do next.
 init_command() {
   local public=no path=''
   while (($#)); do
@@ -2824,11 +2822,11 @@ capture_mac() {
   # shellcheck disable=SC2016 # the template's, not the shell's
   if ! {
     mkdir -p "$home" &&
-      printf '%s\n' '# The manifest: https://github.com/dbaggott/macelium#the-manifest' "contract $known_contract" >"$path/macelium.conf" &&
+      printf '%s\n' '# The manifest: https://github.com/dbaggott/macelium#configuration-reference' "contract $known_contract" >"$path/macelium.conf" &&
       printf 'home\n' >"$path/.chezmoiroot" &&
       printf '%s\n' "$brewfile" >"$path/Brewfile" &&
       printf '%s\n' '# The macOS settings every machine has, a declaration a line:' \
-        '# https://github.com/dbaggott/macelium#the-settings-list' >"$path/macos.sh" &&
+        '# https://github.com/dbaggott/macelium#configuration-reference' >"$path/macos.sh" &&
       printf '%s\n' '{{- /* macelium finds the state repo through chezmoi source-path, so the' \
         '       config names this checkout as chezmoi'\''s source. */ -}}' \
         'sourceDir = {{ .chezmoi.workingTree | quote }}' >"$home/.chezmoi.toml.tmpl" &&
@@ -2858,10 +2856,9 @@ capture_mac() {
 #
 # setup finds the state repo and sets this Mac up from it, or, when there is
 # none, captures this Mac into a new one, scans it for secrets and pushes it
-# once the operator says to, then sets this Mac up from it (README.md,
-# "Adopt"). Each step is skipped when what it leaves is already there, so
-# running it again goes on from where it stopped. Its functions share the
-# state setup_command declares.
+# once the operator says to, then sets this Mac up from it. Each step is
+# skipped when what it leaves is already there, so running it again goes on
+# from where it stopped. Its functions share the state setup_command declares.
 #
 # Its prompts read the terminal, and fail at end-of-file, even after a partly
 # typed reply, so a run whose terminal has gone away stops at a question and
@@ -3484,7 +3481,7 @@ found_without_sign_in() {
 }
 
 # Takes the state repo, as <owner>/<repo> on GitHub or a git URL, and the
-# path, or neither, for the guided form (README.md, "Adopt").
+# path, or neither, for the guided form.
 setup_command() {
   local args=()
   while (($#)); do

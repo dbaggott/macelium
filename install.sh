@@ -1,7 +1,7 @@
 #!/bin/bash
 # Installs Homebrew, when it is missing, and macelium, or upgrades it, then
 # hands over to macelium setup, which finds or creates the state repo and
-# sets the Mac up from it (README.md, "Adopt"):
+# sets the Mac up from it:
 #   curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh | bash
 # or, naming the state repo:
 #   curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh | bash -s <owner>/<repo>|<git URL> [<path>]
