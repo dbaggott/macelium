@@ -1,38 +1,22 @@
-# Macelium
-
 > **ma·ce·li·um** | `/mækˈsiːliəm/` (*mac-SEAL-ium* — the *c* is "loud," a biphonemic grapheme)  
 > *noun*  
 > Stupidly simple macOS environment management. Edit your setup normally with nothing to remember—featuring automatic drift resolution, one-step bootstrapping, and effortless adoption.
 
 ## Adopt
 
-Run the guided installer. It installs Macelium (and Homebrew if needed), then hands off to `macelium setup`, which snapshots your current apps and settings locally, scans the snapshot for secrets with [gitleaks](https://github.com/gitleaks/gitleaks), and waits for your go-ahead before pushing it to your Git state repo and activating daily drift checks:
+Install Macelium and run `macelium setup` — it snapshots your current apps and settings locally, scans the snapshot for secrets with [gitleaks](https://github.com), and waits for your go-ahead before pushing to your Git state repo and activating daily drift checks:
 
+**Mac without Homebrew:**
 ```bash
 curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh | bash
 ```
 
-Already have Homebrew? This does the same:
-
+**Mac with Homebrew:**
 ```bash
 brew install dbaggott/tap/macelium && macelium setup
 ```
 
-*(Already have a state repo? Your repo's generated README has the one-liner to bootstrap a new Mac, or name it directly: `macelium setup <owner>/<repo>`.)*
-
-<details>
-<summary><strong>Prefer to inspect before running?</strong></summary>
-
-Download and audit `install.sh` first—it only installs Homebrew and Macelium, then runs `macelium setup`; it reads prompts from `/dev/tty`, and only uses `sudo` if Xcode Command Line Tools need to be installed:
-
-```bash
-curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install.sh -o install.sh
-less install.sh
-bash install.sh
-```
-</details>
-
----
+*(Already a Macelium user? Either command above handles that too.)*
 
 ## How it works
 
@@ -53,8 +37,6 @@ bash install.sh
 | `macelium apply` | Resolves drift, updates packages/settings/dotfiles, and runs app hooks. |
 | `macelium settings [--file <path>]` | Captures or checks macOS `defaults` settings. |
 
----
-
 ## Inside the state repo
 
 A state repo is a standard git repository. Only `macelium.conf` is required; everything else is optional and skipped if missing (see [`example/`](example/) for a complete setup).
@@ -71,8 +53,6 @@ apps/<app>/          Per-app post-apply hooks, file watches, and manual steps
 * **Shared across Macs:** Personal values like your name and email live in `home/.chezmoidata.toml` (populated by `macelium init`) and render into templates like `dot_gitconfig.tmpl`.
 * **Machine-specific overrides:** Keep work emails or machine-only shell tweaks out of the repo in `~/.gitconfig.local` and `~/.zshrc.local`. `macelium init` automatically wires `[include]` and `source` hooks into your managed configs.
 * **Never commit secrets:** Even in a private repo, secrets end up on every machine and backup. Resolve secrets on demand via a password manager or macOS Keychain—never inside a chezmoi template, as background `plan --notify` runs will block or fail on interactive prompts.
-
----
 
 ## Configuration reference
 
