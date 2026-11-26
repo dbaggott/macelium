@@ -531,10 +531,15 @@ func (s *Session) runAppsHooks() bool {
 		fmt.Fprintf(s.Err, "after-apply failed for %s\n", strings.Join(failed, ", "))
 		return false
 	}
-	if err := os.MkdirAll(s.stateDir(), 0o755); err != nil {
+	err := os.MkdirAll(s.stateDir(), 0o755)
+	if err == nil {
+		err = os.WriteFile(s.hooksHashFile(), []byte(hash+"\n"), 0o644)
+	}
+	if err != nil {
+		fmt.Fprintln(s.Err, err)
 		return false
 	}
-	return os.WriteFile(s.hooksHashFile(), []byte(hash+"\n"), 0o644) == nil
+	return true
 }
 
 // checkMachine runs every check but the behind one, which plan and apply

@@ -892,7 +892,7 @@ func (s *Session) Setup(args []string) int {
 	}
 
 	u.path = u.defaultPath()
-	if len(args) > 1 {
+	if len(args) > 1 && args[1] != "" {
 		u.path = args[1]
 	}
 	s.heading("Path: " + u.path)

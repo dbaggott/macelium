@@ -16,6 +16,7 @@ const export = `<?xml version="1.0" encoding="UTF-8"?>
 <key>ratio</key><real>1.5</real>
 <key>name</key><string>hello</string>
 <key>colors</key><array><string>red</string><string>green</string></array>
+<key>none</key><array/>
 <key>mixed</key><array><string>a</string><integer>1</integer></array>
 <key>nested</key><dict><key>k</key><integer>1</integer><key>s</key><string>a/b</string></dict>
 <key>when</key><date>2020-01-01T00:00:00Z</date>
@@ -52,6 +53,7 @@ func TestCompareGivesTheCurrentValueAsThePlanShowsIt(t *testing.T) {
 		{Setting{Key: "colors", Type: "array", Values: []string{"red", "green"}}, `["red","green"]`, true},
 		{Setting{Key: "colors", Type: "array", Values: []string{"green", "red"}}, `["red","green"]`, false},
 		{Setting{Key: "colors", Type: "unordered-array", Values: []string{"green", "red"}}, `["red","green"]`, true},
+		{Setting{Key: "none", Type: "array"}, `[]`, true},
 		{Setting{Key: "mixed", Type: "array", Values: []string{"a", "1"}}, `["a",1]`, false},
 		{Setting{Key: "missing", Type: "string", Values: []string{"x"}}, "(not set)", false},
 		{Setting{Key: "count", Type: "string", Values: []string{"-3"}}, "-3 (integer)", false},
@@ -133,6 +135,24 @@ touch_id_sudo
 	}
 	if l.SandboxOf("com.apple.Safari") != 0 || l.SandboxOf("x") != -1 {
 		t.Error("sandbox lookup")
+	}
+}
+
+func TestLoadDropsAnArraysTrailingEmptyElements(t *testing.T) {
+	l, why, _ := load(t, `setting com.apple.dock persistent-apps array ''
+setting d k unordered-array a '' b '' ''
+`)
+	if l == nil {
+		t.Fatal(why)
+	}
+	if got := l.Settings[0].Values; len(got) != 0 {
+		t.Errorf("lone empty element: %q", got)
+	}
+	if got := l.Settings[0].WriteArgs(); !reflect.DeepEqual(got, []string{"write", "com.apple.dock", "persistent-apps", "-array"}) {
+		t.Errorf("empty array args %q", got)
+	}
+	if got := l.Settings[1].Values; !reflect.DeepEqual(got, []string{"a", "", "b"}) {
+		t.Errorf("trailing empty elements: %q", got)
 	}
 }
 

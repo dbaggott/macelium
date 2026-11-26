@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -216,10 +217,27 @@ func (s *Session) startSudo() (func(), bool) {
 	if status != 0 || err != nil {
 		return func() {}, true
 	}
-	return func() {
+	kill := func() {
 		if p, err := os.FindProcess(pid); err == nil {
 			_ = p.Kill()
 		}
+	}
+	// An interrupt ends bootstrap with the keeper stopped, as a return does.
+	interrupted := make(chan os.Signal, 1)
+	signal.Notify(interrupted, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case sig := <-interrupted:
+			kill()
+			os.Exit(128 + int(sig.(syscall.Signal)))
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(interrupted)
+		close(done)
+		kill()
 	}, true
 }
 

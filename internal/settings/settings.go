@@ -137,6 +137,11 @@ func (l *List) declare(name string, args []string) string {
 		case "string":
 			valid = len(values) == 1
 		case "array", "unordered-array":
+			// Trailing empty elements are dropped, so a lone '' declares an
+			// empty array: setting takes at least one value.
+			for len(values) > 0 && values[len(values)-1] == "" {
+				values = values[:len(values)-1]
+			}
 		default:
 			return fmt.Sprintf("setting %s: unknown type '%s'", key, typ)
 		}
