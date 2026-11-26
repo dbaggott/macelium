@@ -218,7 +218,8 @@ test_setup_signs_in_before_the_clone_when_github_refuses_an_anonymous_read() {
 # fails when it is unset; sign_in_as signs it in before a run. Its repo create
 # refuses --private when $STUB_GH_PRIVATE_REFUSED is set, and creates the
 # repo but fails to push to it when $STUB_GH_PUSH_FAILS is; its repo view
-# fails as on a network error when $STUB_GH_VIEW_FAILS is.
+# fails as on a network error when $STUB_GH_VIEW_FAILS is. chezmoi's data
+# names Ann Lee <ann@example.com>, who authors the capture's commit.
 guided_mac() {
   cloneable_state
   mkdir -p "$sandbox/github"
@@ -279,6 +280,7 @@ esac
 STUB
   chmod +x "$sandbox/bin/gh"
   unset STUB_GH_LOGIN STUB_GH_PRIVATE_REFUSED STUB_GH_PUSH_FAILS STUB_GH_VIEW_FAILS
+  export STUB_CHEZMOI_DATA='{"name": "Ann Lee", "email": "ann@example.com"}'
 }
 
 # Takes a login, and has gh signed in as it, as before setup runs.
@@ -307,6 +309,14 @@ github_repo() {
 # has git no longer read it, as on a fresh run, before gh auth setup-git.
 forget_private_repo() {
   git config --global --remove-section url."file://$sandbox/github/$1.git"
+}
+
+# Takes a path, and writes the capture there with it committed, as a run
+# whose push failed leaves it.
+committed_capture() {
+  macelium-setup --init "$1"
+  git -C "$1" add -A
+  git -C "$1" -c user.name=init -c user.email=init@example.com commit -q -m init
 }
 
 # Takes a bare repo, and fails the test unless it has a ref.
@@ -523,7 +533,7 @@ test_setup_guided_stops_when_gh_cannot_say_whether_the_repo_exists() {
 test_setup_guided_refuses_to_create_for_a_path_whose_remote_names_a_missing_repo() {
   guided_mac
   export STUB_GH_LOGIN=me
-  macelium-setup --init "$HOME/macelium-state"
+  committed_capture "$HOME/macelium-state"
   git -C "$HOME/macelium-state" remote add origin https://github.com/me/macelium-state
   : >"$STUB_LOG"
   run_tty '' me 1 '' "$eof" "$eof" -- macelium-setup
@@ -603,14 +613,15 @@ test_setup_guided_resumes_at_the_push_on_another_host() {
   guided_mac
   git init -q --bare "$sandbox/empty.git"
   git config --global url."file://$sandbox/empty.git".insteadOf https://git.example.org/me/empty
-  macelium-setup --init "$HOME/empty"
+  committed_capture "$HOME/empty"
   git -C "$HOME/empty" remote add origin https://git.example.org/me/empty
   : >"$STUB_LOG"
   run_tty 2 https://git.example.org/me/empty '' '' -- macelium-setup
   assert_status 0
   assert_not_contains "$STUB_LOG" "macelium init"
-  assert_order "$out" "==> Pushing $HOME/empty to https://git.example.org/me/empty" "==> macelium bootstrap"
+  assert_order "$out" "==> Committing $HOME/empty" "==> Pushing $HOME/empty to https://git.example.org/me/empty" "==> macelium bootstrap"
   assert_pushed "$sandbox/empty.git"
+  [[ $(git -C "$HOME/empty" rev-list --count HEAD) == 1 ]] || fail "the commit was not amended"
 }
 
 # Takes the answers before an end-of-file, and what a test of that prompt
@@ -776,7 +787,21 @@ test_setup_guided_scans_for_secrets_and_asks_before_the_push() {
     "The new state repo is at $HOME/macelium-state." \
     "Push $HOME/macelium-state to me/macelium-state now? (You can inspect the files in another terminal first) [Y/n]"
   assert_order "$STUB_LOG" "macelium init $HOME/macelium-state" \
-    "gitleaks git $HOME/macelium-state --no-banner --redact" "gh repo create" "macelium bootstrap"
+    "gitleaks dir $HOME/macelium-state --no-banner --redact" "chezmoi data --source $HOME/macelium-state" \
+    "gh repo create" "macelium bootstrap"
+  [[ $(git -C "$HOME/macelium-state" log -1 --format='%an <%ae>') == "Ann Lee <ann@example.com>" ]] ||
+    fail "author: $(git -C "$HOME/macelium-state" log -1 --format='%an <%ae>')"
+  [[ $(git -C "$HOME/macelium-state" rev-list --count HEAD) == 1 ]] || fail "more than one commit"
+}
+
+test_setup_guided_asks_the_commit_author_when_chezmoi_data_names_none() {
+  guided_mac
+  export STUB_GH_LOGIN=me STUB_CHEZMOI_DATA='{}'
+  run_tty '' me 1 '' '' '' Bo bo@example.com -- macelium-setup
+  assert_status 0
+  assert_contains "$out" "The state repo's chezmoi data names no author for its commit."
+  [[ $(git -C "$HOME/macelium-state" log -1 --format='%an <%ae>') == "Bo <bo@example.com>" ]] ||
+    fail "author: $(git -C "$HOME/macelium-state" log -1 --format='%an <%ae>')"
 }
 
 test_setup_guided_shows_secrets_found_and_pushes_nothing_by_default_then_resumes_at_the_scan() {
@@ -788,10 +813,11 @@ test_setup_guided_shows_secrets_found_and_pushes_nothing_by_default_then_resumes
     "Warning: gitleaks found what look like secrets in $HOME/macelium-state, shown above redacted." \
     "Push $HOME/macelium-state to me/macelium-state now? (You can inspect the files in another terminal first) [y/N]" \
     "Run macelium setup again (or install.sh) to go on"
-  assert_contains "$out" "Nothing was pushed."
+  assert_contains "$out" "Nothing was committed or pushed."
   # shellcheck disable=SC2088 # the message's ~
   assert_contains "$out" "~/.zshrc.local or ~/.gitconfig.local"
-  assert_contains "$out" "fold the change into init's commit (git -C $HOME/macelium-state commit -a --amend --no-edit)"
+  assert_contains "$out" "Nothing is committed until you say to push."
+  [[ -z $(git -C "$HOME/macelium-state" rev-list --all) ]] || fail "it committed"
   assert_not_contains "$STUB_LOG" "gh repo create"
   assert_not_contains "$STUB_LOG" "macelium bootstrap"
   [[ ! -e $sandbox/github/me/macelium-state.git ]] || fail "created the repo"
@@ -803,7 +829,7 @@ test_setup_guided_shows_secrets_found_and_pushes_nothing_by_default_then_resumes
   assert_contains "$out" "==> macelium init: $HOME/macelium-state already holds the new state repo"
   assert_contains "$out" "No secrets detected in $HOME/macelium-state."
   assert_not_contains "$STUB_LOG" "macelium init"
-  assert_order "$STUB_LOG" "gitleaks git $HOME/macelium-state" "gh repo create me/macelium-state --private" \
+  assert_order "$STUB_LOG" "gitleaks dir $HOME/macelium-state" "gh repo create me/macelium-state --private" \
     "macelium bootstrap $HOME/macelium-state tty=yes"
   assert_pushed "$sandbox/github/me/macelium-state.git"
 }
@@ -813,7 +839,7 @@ test_setup_guided_pushes_nothing_when_the_review_is_declined() {
   export STUB_GH_LOGIN=me
   run_tty '' me 1 '' '' n -- macelium-setup
   assert_status 0
-  assert_contains "$out" "Nothing was pushed."
+  assert_contains "$out" "Nothing was committed or pushed."
   assert_not_contains "$STUB_LOG" "gh repo create"
   assert_not_contains "$STUB_LOG" "macelium bootstrap"
 }

@@ -20,11 +20,13 @@ contract than its own.
   and sets this Mac up from it, or creates it, as `install.sh` did; with
   Homebrew already installed, `brew install dbaggott/tap/macelium &&
   macelium setup` is the whole install.
-- Before pushing a new state repo, `setup` scans its commits with gitleaks,
-  showing what it finds redacted, then shows the repo's path and asks
-  before the push, no by default when gitleaks found anything. A no pushes
-  nothing, and running `setup` again goes on from the scan. Without
-  gitleaks it warns that the scan was skipped.
+- `setup` captures a new state repo without committing it, scans its files
+  with gitleaks, showing what it finds redacted, then shows the repo's path
+  and asks before the push, no by default when gitleaks found anything. A
+  yes commits and pushes; a no commits and pushes nothing, so a secret is
+  fixed by editing its file, and running `setup` again goes on from the
+  scan. Without gitleaks it warns that the scan was skipped. The commit's
+  author is the name and email the repo's chezmoi data gives.
 - The formula depends on gitleaks.
 - `install.sh` only installs Homebrew and macelium, or upgrades macelium,
   then hands over to `macelium setup` with its arguments.

@@ -2,13 +2,12 @@
 # Runs macelium setup, the macelium in $STUB_MACELIUM, with its bootstrap
 # and init's capture stubbed: each records its call and whether stdin is a
 # terminal, bootstrap exits $STUB_MACELIUM_STATUS, and the capture writes a
-# repo with macelium.conf and one commit, as the real one does. With
+# repo with macelium.conf and nothing committed, as the real one does. With
 # --init <path>, it only writes that repo.
 
-# Takes the path, and writes init's repo there.
+# Takes the path, and writes init's capture there, with nothing committed.
 capture() {
-  mkdir -p "$1" && printf 'contract 1\n' >"$1/macelium.conf" && git init -q -b main "$1" &&
-    git -C "$1" add -A && git -C "$1" -c user.name=init -c user.email=init@example.com commit -q -m init
+  mkdir -p "$1" && printf 'contract 1\n' >"$1/macelium.conf" && git init -q -b main "$1"
 }
 
 if [[ ${1:-} == --init ]]; then

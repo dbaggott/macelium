@@ -234,7 +234,7 @@ jobs:
           fi
 
           # A1: an empty repo, so setup takes the create flow: init captures
-          # the runner, gitleaks scans it, the push, then the bootstrap. Afterwards
+          # the runner, gitleaks scans it, the commit and the push, then the bootstrap. Afterwards
           # plan finds nothing to list in the Homebrew or files sections.
           # Upgrades available are left out: they follow Homebrew's
           # releases, not what init captured. Its runs skip brew bundle's
@@ -248,7 +248,7 @@ jobs:
           a1="$RUNNER_TEMP/a1.log"
           HOMEBREW_BUNDLE_NO_UPGRADE=1 run_guided "$url" | tee "$a1"
           assert_lines "$a1" "macelium init $HOME/Developer/state" "Scanning $HOME/Developer/state for secrets (gitleaks)" \
-            "Pushing $HOME/Developer/state to $url" \
+            "Committing $HOME/Developer/state" "Pushing $HOME/Developer/state to $url" \
             "macelium bootstrap $HOME/Developer/state"
           [[ -n $(git -C "$remote" for-each-ref) ]] || {
             echo "A1: nothing was pushed"

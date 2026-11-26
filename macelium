@@ -2588,6 +2588,7 @@ bootstrap() {
 # (README.md, "Person values and machine differences").
 zshrc_local_line='[[ -r ~/.zshrc.local ]] && source ~/.zshrc.local'
 gitconfig_local_section=$'[include]\n\tpath = ~/.gitconfig.local'
+capture_name='' capture_email=''
 
 # Takes the question and its default, which may be empty. Asks on the
 # terminal, again while the reply and the default are both empty, and prints
@@ -2748,12 +2749,29 @@ init_command() {
   done
   [[ -n $path ]] || usage_error "missing <path>"
   capture_mac "$public" "$path" || return 1
+  if ! commit_capture "$path" "$capture_name" "$capture_email"; then
+    print_error "committing $path failed: remove it and run macelium init again"
+    return 1
+  fi
+  printf '\nState repo: %s, with one commit and no remote.\n' "$path"
   echo "Next, push it to a new repo, then run macelium bootstrap $path."
 }
 
+# Takes the path of a repo capture_mac wrote, and the name and email to
+# author its commit. Commits everything in it, amending the commit there is
+# when there is one, so a repo not yet pushed always has one commit.
+commit_capture() {
+  local amend=()
+  git -C "$1" rev-parse -q --verify HEAD >/dev/null && amend=(--amend)
+  git -C "$1" add -A &&
+    git -C "$1" -c user.name="$2" -c user.email="$3" -c commit.gpgsign=false \
+      commit -q --no-verify ${amend[@]+"${amend[@]}"} -m 'Capture this Mac with macelium init'
+}
+
 # Takes whether the repo will be public, yes or no, and the path. Captures
-# this Mac into a new state repo at the path, a git repo with one commit and
-# no remote.
+# this Mac into a new state repo at the path, a git repo with nothing
+# committed and no remote, and sets capture_name and capture_email to the
+# name and email it asked for.
 capture_mac() {
   local public=$1 path=$2
   refuse_foreign_chezmoi || return 1
@@ -2821,10 +2839,7 @@ capture_mac() {
       { [[ -z $gitconfig ]] || printf '%s\n' "$gitconfig" >"$home/dot_gitconfig.tmpl"; } &&
       { [[ -z $zshrc ]] || printf '%s\n' "$zshrc" >"$home/dot_zshrc"; } &&
       { [[ -z $mise ]] || { mkdir -p "$home/dot_config/mise" && printf '%s\n' "$mise" >"$home/dot_config/mise/config.toml"; }; } &&
-      git init -q -b main "$path" &&
-      git -C "$path" add -A &&
-      git -C "$path" -c user.name="$name" -c user.email="$email" -c commit.gpgsign=false \
-        commit -q --no-verify -m 'Capture this Mac with macelium init'
+      git init -q -b main "$path"
   }; then
     print_error "writing $path failed: remove it and run macelium init again"
     return 1
@@ -2834,7 +2849,7 @@ capture_mac() {
     return 1
   fi
 
-  printf '\nState repo: %s, with one commit and no remote.\n' "$path"
+  capture_name=$name capture_email=$email
   [[ -z $gitconfig_moved ]] || echo "Moved lines that look like secrets to ~/.gitconfig.local."
   [[ -z $zshrc_moved ]] || echo "Moved lines that look like secrets to ~/.zshrc.local."
 }
@@ -3151,17 +3166,18 @@ clone_asked_path() {
   esac
 }
 
-# Runs gitleaks over the commits at the path, setting gitleaks_output to what
+# Runs gitleaks over the files at the path, setting gitleaks_output to what
 # it printed, and returns its exit status.
 run_gitleaks() {
-  gitleaks_output=$(gitleaks git "$path" --no-banner --redact --verbose --log-level warn \
+  gitleaks_output=$(gitleaks dir "$path" --no-banner --redact --verbose --log-level warn \
     --exit-code "$gitleaks_found_status" 2>&1)
 }
 
-# Scans the commits at the path, which are what the push sends, for secrets
-# with gitleaks, and says what it found, showing any secret redacted. Sets
-# secrets_found to yes when it found one. Says the scan was skipped when
-# gitleaks is not installed, and fails when gitleaks fails.
+# Scans the files at the path, which are what the commit before the push
+# takes, for secrets with gitleaks, and says what it found, showing any
+# secret redacted. Sets secrets_found to yes when it found one. Says the
+# scan was skipped when gitleaks is not installed, and fails when gitleaks
+# fails.
 scan_for_secrets() {
   local status gitleaks_output=''
   secrets_found=no
@@ -3180,7 +3196,7 @@ scan_for_secrets() {
     "$gitleaks_found_status")
       secrets_found=yes
       printf '%s\n\n' "$gitleaks_output"
-      echo "Warning: gitleaks found what look like secrets in $path, shown above redacted. Pushing sends them to $name, and from there to every Mac set up from it. Remove each from the file, or move it to ~/.zshrc.local or ~/.gitconfig.local, which stay on this Mac, then fold the change into init's commit (git -C $path commit -a --amend --no-edit): the push sends every commit, so a later one that removes a secret still pushes it." >&2
+      echo "Warning: gitleaks found what look like secrets in $path, shown above redacted. Pushing sends them to $name, and from there to every Mac set up from it. Remove each from its file, or move it to ~/.zshrc.local or ~/.gitconfig.local, which stay on this Mac. Nothing is committed until you say to push." >&2
       ;;
     *)
       printf '%s\n' "$gitleaks_output" >&2
@@ -3198,8 +3214,33 @@ review_before_push() {
   printf '\nThe new state repo is at %s.\n' "$path"
   ask_yes "Push $path to $name now? (You can inspect the files in another terminal first)" "$default" || return 1
   [[ $yes == no ]] || return 0
-  printf '%s\n' "Nothing was pushed. Look over and change $path as you need to, folding each change into init's commit (git -C $path commit -a --amend --no-edit) rather than adding one, since the push sends every commit." \
-    "Run macelium setup again (or install.sh) to go on: it finds $path already captured, and scans it and asks again before it pushes."
+  printf '%s\n' "Nothing was committed or pushed. Change the files in $path as you need to." \
+    "Run macelium setup again (or install.sh) to go on: it finds $path already captured, and scans it and asks again before it commits and pushes."
+}
+
+# Sets capture_name and capture_email to the name and email the state repo
+# at the path gives every machine, in its chezmoi data, which author its
+# commit. Asks for either it lacks.
+read_capture_author() {
+  local data
+  # A config file that does not exist keeps this Mac's chezmoi config out.
+  data=$(chezmoi data --source "$path" --config "$path/.git/no-chezmoi-config.toml" --format json 2>/dev/null)
+  capture_name=$(jq -r '.name // empty' <<<"$data" 2>/dev/null)
+  capture_email=$(jq -r '.email // empty' <<<"$data" 2>/dev/null)
+  if [[ -z $capture_name || -z $capture_email ]]; then
+    echo "The state repo's chezmoi data names no author for its commit."
+  fi
+  [[ -n $capture_name ]] || capture_name=$(ask_value Name "$(git config --global --includes user.name)") || return 1
+  [[ -n $capture_email ]] || capture_email=$(ask_value Email "$(git config --global --includes user.email)") || return 1
+}
+
+# Commits what the path holds, which the scan and the review saw.
+commit_state_repo() {
+  print_heading "Committing $path"
+  if ! read_capture_author || ! commit_capture "$path" "$capture_name" "$capture_email"; then
+    print_stopped "committing $path failed, so nothing was pushed"
+    return 1
+  fi
 }
 
 # Pushes the state repo's branch to its remote, setting its upstream.
@@ -3286,6 +3327,7 @@ create_state_repo() {
   scan_for_secrets || return 1
   review_before_push || return 1
   [[ $yes == yes ]] || return 0
+  commit_state_repo || return 1
 
   if [[ $1 == new ]]; then
     create_on_github || return 1
