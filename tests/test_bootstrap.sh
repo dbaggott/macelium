@@ -345,7 +345,7 @@ test_bootstrap_warns_when_filevault_is_off_and_goes_on() {
   assert_order "$out" "FYI: Your macOS FileVault is off." "Macelium will now configure your computer" "==> chezmoi init" "Steps:"
   grep -A2 -F "FYI: Your macOS FileVault is off." "$out" | tail -n 2 | head -n 1 | grep -q '^best practice' ||
     fail "the FileVault note's lines are not consecutive"
-  sed -n '/^Steps:/,$p' "$out" | grep -qF "FileVault is off: enable it through System Settings -> Privacy & Security -> FileVault" ||
+  sed -n '/^Steps:/,$p' "$out" | grep -qF "FileVault is off: enable it through System Settings → Privacy & Security → FileVault" ||
     fail "no FileVault warning at the end"
   assert_contains "$out" "Bootstrap complete, with 1 warning."
   export STUB_FDESETUP_STATUS=$'FileVault is Off.\nA line after it.'
