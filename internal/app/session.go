@@ -274,10 +274,3 @@ func emptyDir(path string) bool {
 	entries, err := os.ReadDir(path)
 	return err == nil && len(entries) == 0
 }
-
-// quotedString returns s double-quoted, its backslashes and double quotes
-// escaped: a JSON string, or a TOML basic string.
-func quotedString(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
-}

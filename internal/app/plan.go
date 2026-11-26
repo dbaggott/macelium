@@ -290,20 +290,21 @@ func (s *Session) printRefusalLogLine(why string) {
 	s.println(line)
 }
 
-// shellQuote quotes s as bash's printf %q does, so the log line reads as
-// it always has.
+// shellQuote quotes s as /bin/bash's printf %q does in the C locale that
+// launchd runs the service in, so the log line reads as it always has.
 func shellQuote(s string) string {
 	if s == "" {
 		return "''"
 	}
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c >= 0x7f {
 			return ansiQuote(s)
 		}
 	}
 	var b strings.Builder
-	for i, r := range s {
-		switch r {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
 		case ' ', '\t', '\'', '"', '\\', '|', '&', ';', '(', ')', '<', '>', '!', '{', '}', '*', '[', '?', ']', '^', '$', '`', ',':
 			b.WriteByte('\\')
 		case '#':
@@ -311,33 +312,31 @@ func shellQuote(s string) string {
 				b.WriteByte('\\')
 			}
 		}
-		b.WriteRune(r)
+		b.WriteByte(c)
 	}
 	return b.String()
 }
 
-// ansiQuote quotes s as $'...', for a string with control characters.
+// ansiEscapes are the escapes $'...' quoting writes for a byte, beside the
+// octal it writes for any other that is not printable ASCII.
+var ansiEscapes = map[byte]string{
+	0x1b: `\E`, '\a': `\a`, '\b': `\b`, '\f': `\f`, '\n': `\n`, '\r': `\r`, '\t': `\t`, '\v': `\v`,
+	'\'': `\'`, '\\': `\\`,
+}
+
+// ansiQuote quotes s as $'...', for a string that is not all printable
+// ASCII.
 func ansiQuote(s string) string {
 	var b strings.Builder
 	b.WriteString("$'")
-	for _, r := range s {
-		switch r {
-		case '\n':
-			b.WriteString(`\n`)
-		case '\t':
-			b.WriteString(`\t`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\'':
-			b.WriteString(`\'`)
-		case '\\':
-			b.WriteString(`\\`)
-		default:
-			if r < 0x20 || r == 0x7f {
-				fmt.Fprintf(&b, `\%03o`, r)
-			} else {
-				b.WriteRune(r)
-			}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if e, ok := ansiEscapes[c]; ok {
+			b.WriteString(e)
+		} else if c < 0x20 || c >= 0x7f {
+			fmt.Fprintf(&b, `\%03o`, c)
+		} else {
+			b.WriteByte(c)
 		}
 	}
 	b.WriteString("'")

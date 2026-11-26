@@ -49,7 +49,7 @@ func (s *Session) appsToAdopt() ([]string, string) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, strings.TrimRight(stderr.String(), "\n")
+		return nil, failureOf("brew bundle list --cask", stderr.String(), err)
 	}
 	var casks []string
 	for _, line := range strings.Split(string(out), "\n") {
@@ -65,7 +65,7 @@ func (s *Session) appsToAdopt() ([]string, string) {
 	cmd.Stderr = &stderr
 	info, err := cmd.Output()
 	if err != nil {
-		return nil, strings.TrimRight(stderr.String(), "\n")
+		return nil, failureOf("brew info --cask --json=v2", stderr.String(), err)
 	}
 	var parsed struct {
 		Casks []struct {
@@ -104,6 +104,15 @@ func (s *Session) appsToAdopt() ([]string, string) {
 		}
 	}
 	return apps, ""
+}
+
+// failureOf describes a command that failed, from its errors, or from how
+// it failed when it printed none.
+func failureOf(command, stderr string, err error) string {
+	if stderr = strings.TrimRight(stderr, "\n"); stderr != "" {
+		return stderr
+	}
+	return run.Failure(command, err.Error(), run.Status(err))
 }
 
 // mayChangeApp fails when macOS's App Management protection refuses this

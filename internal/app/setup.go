@@ -319,11 +319,15 @@ func (u *setup) signInToGitHub() bool {
 	return true
 }
 
-// lsRemoteAnonymously reads a GitHub repo's refs with no credential
-// helper, so a gh signed in before this run can't make a private repo read
-// as public.
-func lsRemoteAnonymously(repoPath string) (string, bool) {
-	cmd := exec.Command("git", "-c", "credential.helper=", "ls-remote", "https://github.com/"+repoPath)
+// lsRemoteGitHub reads a GitHub repo's refs over HTTPS, with no prompt for
+// a credential. Anonymously, it uses no credential helper either, so a gh
+// signed in before this run can't make a private repo read as public.
+func lsRemoteGitHub(repoPath string, anonymous bool) (string, bool) {
+	args := []string{"ls-remote", "https://github.com/" + repoPath}
+	if anonymous {
+		args = append([]string{"-c", "credential.helper="}, args...)
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.Output()
 	return string(out), err == nil
@@ -338,7 +342,7 @@ func (u *setup) findRepo(anonymous bool) bool {
 	if u.github {
 		// Once this run has signed in, gh decides.
 		if !u.signedIn {
-			if refs, ok := lsRemoteAnonymously(u.repoPath); ok {
+			if refs, ok := lsRemoteGitHub(u.repoPath, true); ok {
 				u.public, u.found = true, "refs"
 				if refs == "" {
 					u.found = "empty"
@@ -913,7 +917,7 @@ func (s *Session) Setup(args []string) int {
 		if !cloned {
 			u.tellSignIn(u.host)
 		}
-	} else if lsRemote(u.repoPath) {
+	} else if _, ok := lsRemoteGitHub(u.repoPath, false); ok {
 		s.heading("GitHub sign-in: not needed, git can read " + u.name)
 		offerSignIn = true
 	} else if !u.signInToGitHub() {
@@ -921,12 +925,4 @@ func (s *Session) Setup(args []string) int {
 		return 1
 	}
 	return u.cloneAndBootstrap(offerSignIn, cloned)
-}
-
-// lsRemote reports whether git reads a GitHub repo, with no prompt for a
-// credential.
-func lsRemote(repoPath string) bool {
-	cmd := exec.Command("git", "ls-remote", "https://github.com/"+repoPath)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	return cmd.Run() == nil
 }

@@ -87,8 +87,11 @@ func TestShellQuoteIsBashsPrintfQ(t *testing.T) {
 	for _, s := range []string{
 		"", "plain", "two words", "`git fetch` exited 128: fatal: it's gone", "a=b,c:d", "~home", "#hash", "x~y#z",
 		"tab\there", "line\nbreak", `back\slash "quoted" $var *glob? [x] {y} (z) <a> |&; !^`, "ünïcode",
+		"Homebrew → upgrades — it's\\ \x1b\a\v\x7f",
 	} {
-		want, err := exec.Command("/bin/bash", "-c", `printf %q "$1"`, "_", s).Output()
+		cmd := exec.Command("/bin/bash", "-c", `printf %q "$1"`, "_", s)
+		cmd.Env = append(os.Environ(), "LC_ALL=C")
+		want, err := cmd.Output()
 		if err != nil {
 			t.Fatal(err)
 		}

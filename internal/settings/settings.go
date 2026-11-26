@@ -28,9 +28,10 @@ package settings
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
-	"os"
 	"regexp"
 	"slices"
 	"sort"
@@ -90,12 +91,11 @@ func Load(path string) (*List, string) {
 	if !strings.Contains(path, "/") {
 		path = "./" + path
 	}
-	if r, err := os.Open(path); err != nil {
-		return nil, "cannot read the settings list " + path
-	} else {
-		r.Close()
-	}
 	f, errs, err := declare.Read(path, declarations)
+	var notRead *fs.PathError
+	if errors.As(err, &notRead) {
+		return nil, "cannot read the settings list " + path
+	}
 	if err != nil {
 		return nil, "the settings list does not parse: " + err.Error()
 	}
@@ -222,14 +222,16 @@ func (s Setting) Declared() string {
 	case "array", "unordered-array":
 		quoted := make([]string, len(s.Values))
 		for i, v := range s.Values {
-			quoted[i] = quotedString(v)
+			quoted[i] = Quote(v)
 		}
 		return "[" + strings.Join(quoted, ",") + "]"
 	}
 	return s.Values[0]
 }
 
-func quotedString(s string) string {
+// Quote returns s double-quoted, its backslashes and double quotes
+// escaped: a JSON string, or a TOML basic string.
+func Quote(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }

@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/dbaggott/macelium/internal/run"
+	"github.com/dbaggott/macelium/internal/settings"
 	"github.com/dbaggott/macelium/internal/term"
 )
 
@@ -366,7 +367,7 @@ func (s *Session) capture(public bool, path string) (string, string, bool) {
 		{filepath.Join(path, "Brewfile"), brewfile + "\n"},
 		{filepath.Join(path, "macos.sh"), "# The macOS settings every machine has, a declaration a line:\n# https://github.com/dbaggott/macelium#configuration-reference\n"},
 		{filepath.Join(home, ".chezmoi.toml.tmpl"), "{{- /* macelium finds the state repo through chezmoi source-path, so the\n       config names this checkout as chezmoi's source. */ -}}\nsourceDir = {{ .chezmoi.workingTree | quote }}\n"},
-		{filepath.Join(home, ".chezmoidata.toml"), "# Values every machine shares, which templates read as {{ .name }} and\n# {{ .email }}. One machine's differences go in ~/.gitconfig.local and\n# ~/.zshrc.local, never here.\nname = " + quotedString(name) + "\nemail = " + quotedString(email) + "\n"},
+		{filepath.Join(home, ".chezmoidata.toml"), "# Values every machine shares, which templates read as {{ .name }} and\n# {{ .email }}. One machine's differences go in ~/.gitconfig.local and\n# ~/.zshrc.local, never here.\nname = " + settings.Quote(name) + "\nemail = " + settings.Quote(email) + "\n"},
 	}
 	if gitconfig != "" {
 		files = append(files, struct{ path, content string }{filepath.Join(home, "dot_gitconfig.tmpl"), gitconfig + "\n"})

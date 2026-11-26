@@ -72,9 +72,9 @@ func Banner(w io.Writer, version string) {
 	done := make(chan struct{})
 	go func() {
 		select {
-		case <-interrupted:
+		case sig := <-interrupted:
 			fmt.Fprint(w, "\033[?25h\n")
-			os.Exit(130)
+			os.Exit(128 + int(sig.(syscall.Signal)))
 		case <-done:
 		}
 	}()
