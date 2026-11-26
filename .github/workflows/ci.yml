@@ -36,10 +36,15 @@ jobs:
           # gitleaks reads the pull request's commits from history.
           fetch-depth: 0
 
-      # chezmoi and mise are what macelium needs from Homebrew besides jq,
-      # which the runner has.
-      - name: Install chezmoi, mise, gitleaks and shellcheck
-        run: brew install chezmoi mise gitleaks shellcheck
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # chezmoi, mise and gitleaks are what macelium needs from Homebrew;
+      # shellcheck and golangci-lint are the checks'.
+      - name: Install chezmoi, mise, gitleaks, shellcheck and golangci-lint
+        run: brew install chezmoi mise gitleaks shellcheck golangci-lint
 
       - name: Run the checks
         timeout-minutes: 15
@@ -48,6 +53,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: .github/check.sh "$BASE_SHA..$HEAD_SHA"
 
+      # The checks built ./macelium; the steps below run it.
       # bootstrap needs a terminal, so it runs under script's. The example
       # becomes a clone of a local bare repo, so its checkout has an upstream.
       - name: Bootstrap the example, then plan it

@@ -1,6 +1,0 @@
-#!/bin/bash
-# Runs the real mktemp, recording what it made, so a test can check that
-# macelium removed it.
-made=$(/usr/bin/mktemp "$@") || exit
-echo "mktemp made $made" >>"$STUB_LOG"
-echo "$made"

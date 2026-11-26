@@ -33,7 +33,7 @@ install_macelium() {
     done
   }
 
-  # macelium's spinner (macelium, "spinner"), which install.sh runs before
+  # macelium's spinner (internal/term, Spinner), which install.sh runs before
   # macelium is installed.
   local spinner=('n  ' 'T  ' 'T  ' '/  ' '_. ' '., ' ' o ' ' n ' ' T ' ' T ' ' \ ' '._ ' ',. ' 'o  ')
 

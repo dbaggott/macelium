@@ -165,6 +165,8 @@ test_setup_defaults_the_path_to_the_first_code_directory_else_home() {
   mkdir -p "$HOME/Developer"
   run_tty -- macelium-setup https://git.example.org/me/state.git
   assert_contains "$out" "==> Path: $HOME/Developer/state"
+  run_tty -- macelium-setup example/state ""
+  assert_contains "$out" "==> Path: $HOME/Developer/state"
 }
 
 test_setup_from_another_host_says_how_it_signs_in_and_never_calls_gh() {

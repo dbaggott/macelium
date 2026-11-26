@@ -8,6 +8,8 @@
 set -uo pipefail
 
 tests_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# The tests run macelium and its test build as this checkout builds them.
+make -C "$tests_dir/.." --no-print-directory build harness >/dev/null || exit
 pattern=${1:-}
 # More than the cores: the tests spend most of their time asleep, waiting on
 # a terminal's answers or a step's ticks.

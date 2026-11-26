@@ -2,9 +2,6 @@
 # --version: what the formula's test asserts.
 
 test_version_prints_the_version_line() {
-  local version
-  version=$(grep -E '^VERSION=' "$tool" | head -n 1 | cut -d '"' -f 2)
-  [[ -n $version ]] || fail "no VERSION= line in $tool"
   run --version
   assert_status 0
   [[ $(cat "$out") == "macelium $version" ]] || fail "--version printed: $(cat "$out")"
