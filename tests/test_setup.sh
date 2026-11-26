@@ -854,16 +854,16 @@ test_setup_guided_stops_at_end_of_file_on_the_review() {
   assert_not_contains "$STUB_LOG" "macelium bootstrap"
 }
 
-test_setup_guided_warns_that_the_scan_was_skipped_without_gitleaks() {
-  guided_mac
-  export STUB_GH_LOGIN=me
+test_setup_needs_gitleaks_before_anything_else() {
+  cloneable_state
   rm "$sandbox/bin/gitleaks"
+  : >"$STUB_LOG"
   # Homebrew's bin can hold a real gitleaks.
-  PATH=$sandbox/bin:/usr/bin:/bin run_tty '' me 1 '' '' '' -- macelium-setup
-  assert_status 0
-  assert_contains "$out" "Warning: gitleaks is not installed, so nothing checked $HOME/macelium-state for secrets before the push."
-  assert_contains "$out" "[Y/n]"
-  assert_order "$STUB_LOG" "macelium init" "gh repo create" "macelium bootstrap"
+  PATH=$sandbox/bin:/usr/bin:/bin run_tty -- macelium-setup example/state "$sandbox/clone"
+  assert_status 1
+  assert_contains "$out" "macelium setup: needs gitleaks to scan a new state repo for secrets: brew install gitleaks"
+  [[ ! -e $sandbox/clone ]] || fail "it cloned"
+  [[ ! -s $STUB_LOG ]] || fail "it ran: $(cat "$STUB_LOG")"
 }
 
 test_setup_guided_stops_when_gitleaks_fails() {
@@ -874,4 +874,14 @@ test_setup_guided_stops_when_gitleaks_fails() {
   assert_order "$out" "FTL stat" "macelium setup: stopped: gitleaks failed scanning $HOME/macelium-state, so nothing was pushed"
   assert_not_contains "$out" "Push $HOME/macelium-state"
   assert_not_contains "$STUB_LOG" "gh repo create"
+}
+
+test_setup_guided_stops_at_end_of_file_on_the_commit_author() {
+  guided_mac
+  export STUB_GH_LOGIN=me STUB_CHEZMOI_DATA='{}'
+  run_tty '' me 1 '' '' '' "$eof" "$eof" -- macelium-setup
+  assert_status 1
+  assert_contains "$out" "macelium setup: stopped: no answer"
+  assert_not_contains "$STUB_LOG" "gh repo create"
+  [[ -z $(git -C "$HOME/macelium-state" rev-list --all) ]] || fail "it committed"
 }

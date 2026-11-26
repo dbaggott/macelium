@@ -3175,20 +3175,12 @@ run_gitleaks() {
 
 # Scans the files at the path, which are what the commit before the push
 # takes, for secrets with gitleaks, and says what it found, showing any
-# secret redacted. Sets secrets_found to yes when it found one. Says the
-# scan was skipped when gitleaks is not installed, and fails when gitleaks
-# fails.
+# secret redacted. Sets secrets_found to yes when it found one, and fails
+# when gitleaks fails.
 scan_for_secrets() {
   local status gitleaks_output=''
   secrets_found=no
   print_heading "Scanning $path for secrets (gitleaks)"
-  if ! command -v gitleaks >/dev/null; then
-    local skipped="gitleaks is not installed, so nothing checked $path for secrets before the push. Look it over yourself, or run brew install gitleaks, then macelium setup again."
-    echo "Warning: $skipped" >&2
-    # Again at the end of the bootstrap, which a skipped scan could otherwise scroll past.
-    warn "$skipped"
-    return 0
-  fi
   with_spinner "Scanning $path for secrets" run_gitleaks
   status=$?
   case $status in
@@ -3230,8 +3222,14 @@ read_capture_author() {
   if [[ -z $capture_name || -z $capture_email ]]; then
     echo "The state repo's chezmoi data names no author for its commit."
   fi
-  [[ -n $capture_name ]] || capture_name=$(ask_value Name "$(git config --global --includes user.name)") || return 1
-  [[ -n $capture_email ]] || capture_email=$(ask_value Email "$(git config --global --includes user.email)") || return 1
+  while [[ -z $capture_name ]]; do
+    ask Name "$(git config --global --includes user.name)" || return 1
+    capture_name=$answer
+  done
+  while [[ -z $capture_email ]]; do
+    ask Email "$(git config --global --includes user.email)" || return 1
+    capture_email=$answer
+  done
 }
 
 # Commits what the path holds, which the scan and the review saw.
@@ -3509,6 +3507,12 @@ setup_command() {
     usage_error "'${args[0]}' is neither <owner>/<repo> nor a git URL"
   fi
   require_terminal || return 1
+  # The formula depends on gitleaks. Only a new state repo is scanned, but
+  # setup checks first, so it never stops partway for want of it.
+  if ! command -v gitleaks >/dev/null; then
+    print_error "needs gitleaks to scan a new state repo for secrets: brew install gitleaks"
+    return 1
+  fi
   refuse_foreign_chezmoi || return 1
   if ((${#args[@]} == 0)); then
     guided_setup
