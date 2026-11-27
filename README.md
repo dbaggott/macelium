@@ -4,12 +4,11 @@
 
 ## Why Macelium?
 
-Macelium streamlines macOS setup and dotfile management:
-
-* **Edit normally:** Make changes and let scheduled checks track drift.
-* **Adopt your current Mac:** Run `macelium setup` to snapshot your environment and scan for secrets via [gitleaks](https://github.com).
-* **Smart macOS settings:** `macos.sh` monitors real system state and safely handles service restarts.
-* **Zero lock-in:** Built on standard tools like `chezmoi` and `Brewfile`.
+* **Nothing new to remember:** Keep changing your Mac the way you already do (installing apps, adjusting System Settings, editing dotfiles). Macelium notices; you don't have to record anything.
+* **Start from the Mac you have:** No writing config from scratch. Your current setup becomes the starting point.
+* **More than dotfiles:** Homebrew packages, macOS settings and per-app setup are tracked alongside your dotfiles.
+* **A new Mac in one step:** Point a fresh machine at your repo and it ends up like the old one.
+* **Zero lock-in:** Your state is a plain git repo built on `chezmoi` and a `Brewfile`. Stop using Macelium and it still works.
 
 ## Adopt
 
@@ -25,11 +24,14 @@ curl -fsSL https://github.com/dbaggott/macelium/releases/latest/download/install
 brew install dbaggott/tap/macelium && macelium setup
 ```
 
+*(Already a Macelium user? Either command above handles that too!)*
+
 ## How it works
 
-1. **Use your Mac normally:** Make direct changes to your setup.
-2. **Automatic drift detection:** Scheduled background checks run `macelium plan --notify` to catch discrepancies.
-3. **Sync on demand:** Run `macelium apply` to align your machine and repo, or `macelium bootstrap` to replicate your setup onto a new Mac.
+1. **Capture:** `macelium setup` snapshots your apps, dotfiles and macOS settings into a git state repo. It scans the snapshot for secrets with [gitleaks](https://github.com/gitleaks/gitleaks) and pushes only when you say so.
+2. **Detect:** A background service periodically runs `macelium plan --notify` and notifies you when your Mac and the repo have drifted apart.
+3. **Reconcile:** `macelium apply` brings them back in line: packages, settings, dotfiles and app hooks.
+4. **Replicate:** On a new Mac, the same Adopt command (or `macelium bootstrap`) sets it up from your repo.
 
 ---
 
